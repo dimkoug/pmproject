@@ -223,7 +223,9 @@ body {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  /* Wider minimum so big finance numbers ("$1,200,000,000") don't force wrap
+     at typical column widths; shrinks gracefully on narrow viewports. */
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
@@ -235,6 +237,12 @@ body {
   padding: 1.25rem 1.5rem;
   box-shadow: var(--shadow-xs);
   transition: all 0.2s;
+  /* New: turn each card into a CSS container so the value can shrink when
+     the card is narrow. Also allows long numbers to break instead of
+     clipping the card's layout. */
+  container-type: inline-size;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .stat-card:hover {
@@ -252,11 +260,34 @@ body {
 }
 
 .stat-card .value {
-  font-size: 1.85rem;
+  /* Fluid font-size: shrinks when the card itself is narrow (via container
+     query below) or the viewport is narrow. clamp floor keeps long numbers
+     legible; ceiling keeps short numbers from looking cartoonish. */
+  font-size: clamp(1.1rem, 2.2cqi + 0.6rem, 1.85rem);
   font-weight: 700;
   letter-spacing: -0.03em;
   color: var(--gray-900);
   line-height: 1.2;
+  /* Let long, no-space numeric strings break cleanly instead of overflowing. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Fallback for browsers without CSS container queries (cqi unit) — cap the
+   value at the viewport-width-scaled size so layout never breaks. */
+@supports not (container-type: inline-size) {
+  .stat-card .value {
+    font-size: clamp(1.1rem, 2vw + 0.6rem, 1.85rem);
+  }
+}
+
+/* When the card itself is especially narrow (e.g., dense 6-column layout on
+   tablet), drop the ceiling further so huge values like "$1,200,000,000"
+   still fit on one line. */
+@container (max-width: 220px) {
+  .stat-card .value {
+    font-size: clamp(0.95rem, 9cqi, 1.3rem);
+  }
 }
 
 /* ── Tables ─────────────────────────────────────────────────────── */

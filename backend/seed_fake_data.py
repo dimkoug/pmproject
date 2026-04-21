@@ -1451,6 +1451,677 @@ def _seed_enterprise_data(client: httpx.Client, headers: dict):
     log(f"Created {inv_count} AP invoices")
 
 
+def _seed_wider_data(client: httpx.Client, headers: dict):
+    """Fill in the less-obvious tables: DMS content, ERP ledger/accounts/ops,
+    cross-cutting admin data (webhooks/api-keys/scheduled-reports/dashboards),
+    CRM commissions, ACL membership, approvals. Runs after enterprise + projects
+    so it can link to existing entities."""
+    print(f"\n{'#'*60}")
+    print("SEEDING WIDER DATA (DMS / ERP ledger / Admin / ACL)")
+    print(f"{'#'*60}")
+
+    # Grab references to existing data
+    projects = client.get("/api/projects/", headers=headers).json()
+    project_ids = [p["id"] for p in projects]
+    vendors = client.get("/api/erp/vendors", headers=headers).json()
+    vendor_ids = [v["id"] for v in vendors]
+    companies = client.get("/api/crm/companies", headers=headers).json()
+    company_ids = [c["id"] for c in companies]
+
+    # ── ERP: Chart of Accounts ──────────────────────────────────────
+    print("\n[W 1/15] Chart of Accounts...")
+    account_specs = [
+        ("1000", "Cash on Hand", "asset"),
+        ("1010", "Checking Account", "asset"),
+        ("1020", "Savings Account", "asset"),
+        ("1100", "Accounts Receivable", "asset"),
+        ("1200", "Inventory", "asset"),
+        ("1500", "Property, Plant & Equipment", "asset"),
+        ("1600", "Accumulated Depreciation", "asset"),
+        ("2000", "Accounts Payable", "liability"),
+        ("2100", "Accrued Expenses", "liability"),
+        ("2200", "Income Tax Payable", "liability"),
+        ("2500", "Long-Term Debt", "liability"),
+        ("3000", "Common Stock", "equity"),
+        ("3100", "Retained Earnings", "equity"),
+        ("4000", "Software License Revenue", "revenue"),
+        ("4010", "Services Revenue", "revenue"),
+        ("4020", "Support Revenue", "revenue"),
+        ("5000", "Cost of Goods Sold", "expense"),
+        ("6000", "Salaries & Benefits", "expense"),
+        ("6100", "Rent Expense", "expense"),
+        ("6200", "Utilities", "expense"),
+        ("6300", "Cloud Infrastructure", "expense"),
+        ("6400", "Marketing & Advertising", "expense"),
+        ("6500", "Travel & Entertainment", "expense"),
+        ("6600", "Depreciation Expense", "expense"),
+    ]
+    account_ids_by_type: dict[str, list[str]] = {"asset": [], "liability": [], "equity": [], "revenue": [], "expense": []}
+    account_by_code: dict[str, str] = {}
+    created_accts = 0
+    for code, name, atype in account_specs:
+        resp = client.post("/api/erp/accounts", headers=headers, json={
+            "code": code, "name": name, "account_type": atype,
+            "description": fake.sentence(nb_words=6),
+        })
+        if resp.status_code == 201:
+            a = resp.json()
+            account_ids_by_type[atype].append(a["id"])
+            account_by_code[code] = a["id"]
+            created_accts += 1
+    # If a prior run already populated accounts, pick them up so journal entries still work
+    if not account_by_code:
+        existing = client.get("/api/erp/accounts", headers=headers).json()
+        for a in existing:
+            account_ids_by_type.setdefault(a.get("account_type", "asset"), []).append(a["id"])
+            account_by_code[a["code"]] = a["id"]
+    log(f"Accounts: created {created_accts}, total available: {len(account_by_code)}")
+
+    # ── ERP: Journal Entries ────────────────────────────────────────
+    print("\n[W 2/15] Journal entries...")
+    journal_patterns = [
+        ("Monthly payroll", "6000", "1010", 125_000),
+        ("Rent payment", "6100", "1010", 18_500),
+        ("Cloud infrastructure bill", "6300", "2000", 42_000),
+        ("Customer license payment", "1010", "4000", 250_000),
+        ("Services revenue booking", "1100", "4010", 180_000),
+        ("Support renewal", "1010", "4020", 45_000),
+        ("Marketing campaign spend", "6400", "1010", 32_000),
+        ("Q2 travel expenses", "6500", "1010", 14_800),
+        ("Equipment purchase", "1500", "1010", 85_000),
+        ("Depreciation — Q1", "6600", "1600", 12_500),
+    ]
+    journal_count = 0
+    for i, (memo, debit_code, credit_code, amount) in enumerate(journal_patterns):
+        d_id = account_by_code.get(debit_code); c_id = account_by_code.get(credit_code)
+        if not d_id or not c_id: continue
+        r = client.post("/api/erp/journal", headers=headers, json={
+            "entry_number": f"J-2024-{i+100:04d}",
+            "entry_date": (datetime.utcnow() - timedelta(days=random.randint(1, 90))).date().isoformat(),
+            "memo": memo,
+            "lines": [
+                {"account_id": d_id, "debit": amount, "credit": 0},
+                {"account_id": c_id, "debit": 0, "credit": amount},
+            ],
+        }).json()
+        if r.get("id"):
+            journal_count += 1
+            # Post most of them
+            if i < 7:
+                client.post(f"/api/erp/journal/{r['id']}/post", headers=headers)
+    log(f"Created {journal_count} journal entries (7 posted)")
+
+    # ── ERP: Bank transactions ──────────────────────────────────────
+    print("\n[W 3/15] Bank transactions...")
+    bank_lines = [
+        ("Payroll batch #482", -125_000),
+        ("Stripe payout", 245_000),
+        ("AWS monthly bill", -42_000),
+        ("Office supplies — Staples", -680),
+        ("Customer wire transfer — Microsoft", 450_000),
+        ("Azure enterprise agreement", -38_500),
+        ("Datadog subscription", -8_400),
+        ("SWIFT incoming — SAP SE", 320_000),
+        ("Google Cloud usage", -22_000),
+        ("Q1 tax prepayment", -45_000),
+        ("Wire — IBM licensing", 180_000),
+        ("Refund — duplicate charge", 2_400),
+        ("Insurance premium", -18_000),
+        ("Snowflake billing", -14_800),
+        ("Zoom annual renewal", -6_200),
+    ]
+    bank_count = 0
+    for desc, amount in bank_lines:
+        r = client.post("/api/erp/bank-transactions", headers=headers, json={
+            "description": desc, "amount": amount,
+            "txn_date": (datetime.utcnow() - timedelta(days=random.randint(1, 60))).date().isoformat(),
+        })
+        if r.status_code == 201: bank_count += 1
+    log(f"Created {bank_count} bank transactions")
+
+    # ── ERP: Currencies & FX ────────────────────────────────────────
+    print("\n[W 4/15] Currencies & FX rates...")
+    for code, name in [("USD", "US Dollar"), ("EUR", "Euro"), ("GBP", "Pound Sterling"), ("JPY", "Japanese Yen"), ("INR", "Indian Rupee"), ("CAD", "Canadian Dollar")]:
+        client.post("/api/erp/currencies", headers=headers, json={"code": code, "name": name})
+    for pair, rate in [("EUR/USD", 1.085), ("GBP/USD", 1.268), ("USD/JPY", 149.5), ("USD/INR", 83.2), ("USD/CAD", 1.362)]:
+        client.post("/api/erp/fx-rates", headers=headers, json={
+            "base_code": pair.split("/")[0], "quote_code": pair.split("/")[1],
+            "rate": rate, "effective_date": datetime.utcnow().date().isoformat(),
+        })
+    log("Created 6 currencies + 5 FX rates")
+
+    # ── ERP: Inventory (warehouses, products, stock) ────────────────
+    print("\n[W 5/15] Inventory...")
+    warehouse_ids = []
+    for code, name, addr in [
+        ("WH-NYC", "New York Main", "100 Hudson St, NY"),
+        ("WH-LAX", "Los Angeles DC", "500 Port Ave, LA"),
+        ("WH-CHI", "Chicago Central", "200 S Wacker, IL"),
+    ]:
+        r = client.post("/api/erp/warehouses", headers=headers, json={"code": code, "name": name, "address": addr})
+        if r.status_code == 201:
+            warehouse_ids.append(r.json()["id"])
+    if not warehouse_ids:
+        warehouse_ids = [w["id"] for w in client.get("/api/erp/warehouses", headers=headers).json()]
+
+    product_ids = []
+    products_spec = [
+        ("SKU-LAP-01", "Dell Latitude 7450 Laptop", 1450, 1899, 10),
+        ("SKU-MON-01", "Dell UltraSharp 27\" Monitor", 480, 649, 15),
+        ("SKU-KYB-01", "Logitech MX Mechanical Keyboard", 120, 179, 25),
+        ("SKU-HDS-01", "Sony WH-1000XM5 Headset", 320, 399, 20),
+        ("SKU-DOCK-01", "CalDigit TS4 Thunderbolt Dock", 380, 489, 10),
+        ("SKU-CAM-01", "Logitech C920 HD Webcam", 68, 99, 30),
+        ("SKU-CHR-01", "Herman Miller Embody Chair", 1600, 1995, 5),
+        ("SKU-DESK-01", "Standing Desk Electric", 420, 599, 8),
+    ]
+    for sku, name, cost, price, reorder in products_spec:
+        r = client.post("/api/erp/products", headers=headers, json={
+            "sku": sku, "name": name, "unit_cost": cost, "unit_price": price, "reorder_point": reorder,
+        })
+        if r.status_code == 201:
+            product_ids.append(r.json()["id"])
+    if not product_ids:
+        product_ids = [p["id"] for p in client.get("/api/erp/products", headers=headers).json()]
+    # Stock movements
+    mv_count = 0
+    for _ in range(40):
+        if not product_ids or not warehouse_ids: break
+        client.post("/api/erp/stock/movements", headers=headers, json={
+            "product_id": random.choice(product_ids),
+            "warehouse_id": random.choice(warehouse_ids),
+            "movement_type": random.choice(["receipt", "receipt", "issue", "adjust"]),
+            "quantity": random.randint(1, 50),
+        })
+        mv_count += 1
+    log(f"Created {len(warehouse_ids)} warehouses, {len(product_ids)} products, {mv_count} movements")
+
+    # ── ERP: Expenses, Assets, Budgets per project ──────────────────
+    print("\n[W 6/15] Expenses, assets, budgets per project...")
+    expense_count = asset_count = budget_count = 0
+    expense_descs = [
+        ("Developer laptops — 5 units", "equipment", 9_500),
+        ("Cloud compute — AWS Q1", "software", 42_000),
+        ("Conference travel — SFO→NYC", "travel", 2_400),
+        ("Contractor invoice — Acme Consulting", "consulting", 18_000),
+        ("Software license renewals", "software", 22_000),
+        ("Office supplies", "overhead", 1_200),
+        ("Team offsite lodging", "travel", 8_500),
+        ("Agency creative work", "consulting", 12_000),
+    ]
+    asset_specs = [
+        ("Dell PowerEdge R760xs Server", "IT Hardware", 14_500, 11_200, "Datacenter East"),
+        ("Cisco Catalyst 9300 Switch", "Networking", 8_200, 6_400, "Datacenter East"),
+        ("Meeting Room AV System", "AV", 18_000, 14_500, "HQ Boston"),
+        ("Standing desks — 20 units", "Office Furniture", 12_000, 9_500, "HQ Boston"),
+        ("Electric vehicle fleet — 3", "Transportation", 145_000, 128_000, "LA Office"),
+    ]
+    for pid in project_ids[:6]:  # limit to main 6 projects
+        for desc, cat, amt in random.sample(expense_descs, random.randint(3, 5)):
+            r = client.post("/api/erp/expenses", headers=headers, json={
+                "project_id": pid, "description": desc, "category": cat,
+                "amount": amt * random.uniform(0.85, 1.15),
+                "expense_date": (datetime.utcnow() - timedelta(days=random.randint(1, 90))).date().isoformat(),
+            })
+            if r.status_code == 201: expense_count += 1
+        for name, cat, pcost, cval, loc in random.sample(asset_specs, random.randint(1, 3)):
+            r = client.post("/api/erp/assets", headers=headers, json={
+                "project_id": pid, "name": name, "category": cat,
+                "purchase_cost": pcost, "current_value": cval, "location": loc,
+                "asset_tag": f"AST-{fake.random_int(10000, 99999)}",
+            })
+            if r.status_code == 201: asset_count += 1
+        # Budget
+        budget_period_start = datetime.utcnow().date().replace(month=1, day=1)
+        budget_period_end = datetime.utcnow().date().replace(month=12, day=31)
+        r = client.post("/api/erp/budgets", headers=headers, json={
+            "project_id": pid,
+            "name": f"FY{datetime.utcnow().year} Budget",
+            "period_start": budget_period_start.isoformat(),
+            "period_end": budget_period_end.isoformat(),
+            "lines": [
+                {"label": "Labor", "category": "labor", "planned_amount": 450_000},
+                {"label": "Infrastructure", "category": "software", "planned_amount": 95_000},
+                {"label": "Travel", "category": "travel", "planned_amount": 28_000},
+                {"label": "Equipment", "category": "equipment", "planned_amount": 65_000},
+                {"label": "Overhead", "category": "overhead", "planned_amount": 42_000},
+            ],
+        })
+        if r.status_code == 201: budget_count += 1
+    log(f"Created {expense_count} expenses, {asset_count} assets, {budget_count} budgets")
+
+    # ── ERP: Recurring invoices + AR invoices + payments ────────────
+    print("\n[W 7/15] Recurring invoices, AR invoices, payments...")
+    recurring_count = 0
+    for vname, amount, freq in [
+        ("Azure monthly subscription", 38_500, "monthly"),
+        ("AWS usage", 42_000, "monthly"),
+        ("Datadog monitoring", 8_400, "monthly"),
+        ("Salesforce seats", 125_000, "yearly"),
+        ("Snowflake compute", 14_800, "monthly"),
+    ]:
+        r = client.post("/api/erp/recurring-invoices", headers=headers, json={
+            "template_name": vname, "amount": amount, "frequency": freq,
+        })
+        if r.status_code == 201: recurring_count += 1
+
+    ar_count = 0
+    for cid in company_ids[:15]:
+        r = client.post("/api/erp/invoices", headers=headers, json={
+            "invoice_number": f"AR-{fake.random_int(100000, 999999)}",
+            "invoice_type": "receivable",
+            "subtotal": round(random.uniform(25_000, 500_000), 2),
+            "tax_rate": random.choice([0, 7, 10, 19, 20]),
+            "due_date": (datetime.utcnow() + timedelta(days=random.randint(-20, 45))).date().isoformat(),
+        })
+        if r.status_code == 201: ar_count += 1
+
+    # Payments on some AR invoices
+    ar_invoices = client.get("/api/erp/invoices", headers=headers).json()
+    receivable_invoices = [i for i in ar_invoices if i.get("invoice_type") == "receivable"][:10]
+    payment_count = 0
+    for inv in receivable_invoices:
+        r = client.post("/api/erp/payments", headers=headers, json={
+            "invoice_id": inv["id"],
+            "amount": round(inv.get("total", 0) * random.uniform(0.3, 1.0), 2),
+        })
+        if r.status_code in (200, 201): payment_count += 1
+    log(f"Created {recurring_count} recurring, {ar_count} AR invoices, {payment_count} payments")
+
+    # ── ERP: Depreciation & credit notes & requisitions ────────────
+    print("\n[W 8/15] Depreciation, credit notes, requisitions...")
+    assets_in = client.get("/api/erp/assets", headers=headers).json()
+    dep_count = 0
+    for asset in assets_in[:6]:
+        r = client.post("/api/erp/depreciation", headers=headers, json={
+            "asset_id": asset["id"],
+            "useful_life_months": random.choice([36, 48, 60, 84]),
+            "salvage_value": float(asset.get("current_value") or 0) * 0.1,
+            "start_date": (datetime.utcnow() - timedelta(days=random.randint(30, 365))).date().isoformat(),
+        })
+        if r.status_code == 201: dep_count += 1
+
+    # Credit notes on a few AR invoices
+    cn_count = 0
+    for inv in receivable_invoices[:3]:
+        r = client.post("/api/erp/credit-notes", headers=headers, json={
+            "invoice_id": inv["id"],
+            "cn_number": f"CN-{fake.random_int(10000, 99999)}",
+            "amount": round(inv.get("total", 0) * 0.1, 2),
+            "reason": random.choice(["Billing correction", "Service credit", "Prorated refund"]),
+        })
+        if r.status_code == 201: cn_count += 1
+
+    # Requisitions per project
+    req_count = 0
+    for pid in project_ids[:6]:
+        for _ in range(random.randint(1, 3)):
+            r = client.post("/api/erp/requisitions", headers=headers, json={
+                "project_id": pid,
+                "req_number": f"REQ-{fake.random_int(100000, 999999)}",
+                "justification": fake.sentence(nb_words=10),
+                "items": [{
+                    "description": random.choice(["Laptops for new hires", "Cloud compute expansion", "Team training course", "Licensing renewal"]),
+                    "quantity": random.randint(1, 20),
+                    "unit_price": round(random.uniform(500, 15_000), 2),
+                }],
+            })
+            if r.status_code == 201: req_count += 1
+    log(f"Created {dep_count} depreciation schedules, {cn_count} credit notes, {req_count} requisitions")
+
+    # ── DMS: Folders, docs, templates, signatures, retention, workflows ──
+    print("\n[W 9/15] DMS content...")
+    folder_ids = []
+    folder_specs = [
+        ("Contracts & MSAs", None),
+        ("Policies", None),
+        ("Marketing Assets", None),
+        ("Technical Docs", None),
+        ("Finance & Tax", None),
+        ("HR Templates", None),
+    ]
+    for name, _parent in folder_specs:
+        r = client.post("/api/dms/folders", headers=headers, json={"name": name, "description": f"{name} repository"})
+        if r.status_code == 201: folder_ids.append(r.json()["id"])
+
+    # Upload small text docs
+    doc_count = 0
+    import io
+    doc_specs = [
+        ("MSA - Microsoft Corporation.txt", "msa", "approved"),
+        ("MSA - SAP SE.txt", "msa", "approved"),
+        ("NDA - Oracle Corporation.txt", "nda", "review"),
+        ("SOW - Salesforce Implementation.txt", "sow", "approved"),
+        ("Privacy Policy v3.2.txt", "policy", "approved"),
+        ("Security Policy - Zero Trust.txt", "policy", "approved"),
+        ("Q3 Product Roadmap.txt", "roadmap", "review"),
+        ("Architecture Decision Record - DB Migration.txt", "adr", "approved"),
+        ("Incident Postmortem - Outage 2024-03.txt", "postmortem", "approved"),
+        ("Marketing Campaign Brief - Q2 Launch.txt", "brief", "draft"),
+        ("Employee Handbook v4.txt", "handbook", "approved"),
+        ("Invoice Template - Enterprise.txt", "template", "approved"),
+        ("Vendor Onboarding Checklist.txt", "checklist", "approved"),
+    ]
+    for title, tag, status in doc_specs:
+        content = f"# {title}\n\n{fake.paragraph(nb_sentences=12)}\n\n{fake.paragraph(nb_sentences=8)}".encode()
+        folder_id = random.choice(folder_ids) if folder_ids else None
+        files = {"file": (title, content, "text/plain")}
+        data = {"title": title, "tags": tag, "description": fake.sentence(nb_words=10)}
+        if folder_id: data["folder_id"] = folder_id
+        r = client.post("/api/dms/documents", headers=headers, data=data, files=files)
+        if r.status_code == 201:
+            doc_count += 1
+            doc_id = r.json()["id"]
+            # Update status
+            if status != "draft":
+                client.patch(f"/api/dms/documents/{doc_id}?status={status}", headers=headers)
+
+    # DMS templates
+    tpl_count = 0
+    for tname, tbody in [
+        ("NDA Template", "MUTUAL NON-DISCLOSURE AGREEMENT\n\nThis NDA is between {{company}} and {{counterparty}} ..."),
+        ("MSA Template", "MASTER SERVICES AGREEMENT\n\nEffective date: {{effective_date}}\nParties: {{party_a}}, {{party_b}} ..."),
+        ("SOW Template", "STATEMENT OF WORK #{{sow_number}}\n\nProject: {{project_name}}\nTimeline: {{start_date}} - {{end_date}} ..."),
+        ("Offer Letter", "Dear {{candidate_name}},\n\nWe are pleased to offer you the position of {{role}} at a starting salary of {{salary}} ..."),
+        ("Proposal Template", "PROPOSAL - {{project_name}}\n\nPrepared for: {{client}}\nValid through: {{valid_until}} ..."),
+    ]:
+        r = client.post("/api/dms/templates", headers=headers, json={"name": tname, "body": tbody, "category": "contract"})
+        if r.status_code == 201: tpl_count += 1
+
+    # DMS signatures — request against some docs
+    docs_in = client.get("/api/dms/documents", headers=headers).json()
+    sig_count = 0
+    for doc in docs_in[:5]:
+        r = client.post("/api/dms/signatures", headers=headers, json={
+            "document_id": doc["id"],
+            "signer_email": fake.company_email(),
+            "signer_name": fake.name(),
+            "message": "Please review and sign at your earliest convenience.",
+        })
+        if r.status_code == 201: sig_count += 1
+
+    # Retention policies
+    retention_count = 0
+    for name, days, action in [
+        ("Archive drafts after 90 days", 90, "archive"),
+        ("Delete expired marketing briefs", 365, "delete"),
+        ("Archive old contracts", 730, "archive"),
+    ]:
+        r = client.post("/api/dms/retention-policies", headers=headers, json={"name": name, "days_after": days, "action": action})
+        if r.status_code == 201: retention_count += 1
+
+    # Workflows on some documents
+    wf_count = 0
+    for doc in docs_in[:3]:
+        r = client.post("/api/dms/workflows", headers=headers, json={
+            "document_id": doc["id"], "name": "3-step review",
+            "steps": [
+                {"step_order": 0, "role": "author"},
+                {"step_order": 1, "role": "reviewer"},
+                {"step_order": 2, "role": "approver"},
+            ],
+        })
+        if r.status_code == 201: wf_count += 1
+
+    log(f"Created {len(folder_ids)} folders, {doc_count} docs, {tpl_count} templates, {sig_count} signatures, {retention_count} retention policies, {wf_count} workflows")
+
+    # ── CRM: Commission rules + compute commissions ─────────────────
+    print("\n[W 10/15] CRM commissions...")
+    rule_count = 0
+    for name, pct, min_amt in [
+        ("Standard — 8%", 8.0, 0),
+        ("Enterprise tier — 12%", 12.0, 250_000),
+        ("New business premium — 15%", 15.0, 500_000),
+    ]:
+        r = client.post("/api/crm/commission-rules", headers=headers, json={
+            "name": name, "percentage": pct, "min_amount": min_amt,
+        })
+        if r.status_code == 201: rule_count += 1
+    # Compute commissions from existing won opps
+    r = client.post("/api/crm/commissions/compute", headers=headers)
+    computed = r.json().get("created", 0) if r.status_code == 200 else 0
+    log(f"Created {rule_count} commission rules, computed {computed} commissions")
+
+    # ── CRM: emails & drip enrollments ──────────────────────────────
+    print("\n[W 11/15] CRM emails + drip enrollments...")
+    email_count = 0
+    contacts_in = client.get("/api/crm/contacts", headers=headers).json()[:30]
+    for c in contacts_in:
+        from_email = c.get("email") or fake.email()
+        r = client.post("/api/crm/emails/ingest", headers=headers, json={
+            "direction": random.choice(["inbound", "outbound"]),
+            "from_email": from_email,
+            "to_email": "sales@ourcompany.com" if random.random() < 0.5 else from_email,
+            "subject": random.choice([
+                "Re: Pricing question", "Follow-up on demo",
+                "Introduction — new stakeholder",
+                "Contract amendment request", "Renewal timeline",
+            ]),
+            "body": fake.paragraph(nb_sentences=4),
+        })
+        if r.status_code == 201: email_count += 1
+
+    # Drip enrollments
+    drips = client.get("/api/crm/drips", headers=headers).json()
+    enrolled = 0
+    if drips and contacts_in:
+        for _ in range(20):
+            r = client.post("/api/crm/drips/enroll", headers=headers, json={
+                "sequence_id": random.choice(drips)["id"],
+                "contact_id": random.choice(contacts_in)["id"],
+            })
+            if r.status_code == 201: enrolled += 1
+    log(f"Created {email_count} emails, {enrolled} drip enrollments")
+
+    # ── CRM: Health snapshots ───────────────────────────────────────
+    print("\n[W 12/15] CRM health snapshots...")
+    r = client.post("/api/crm/health/compute", headers=headers)
+    snapshots = r.json().get("snapshots", 0) if r.status_code == 200 else 0
+    log(f"Created {snapshots} health snapshots")
+
+    # ── Cross: webhooks, api_keys, scheduled reports, dashboards ────
+    print("\n[W 13/15] Cross-cutting admin data...")
+    for name, url, events in [
+        ("Slack — #sales channel", "https://hooks.slack.com/services/T00000/B00000/XXXXX", "opportunity_stage_changed,contract_created"),
+        ("Zapier — CRM sync", "https://hooks.zapier.com/hooks/catch/123/abc", "lead_created,contact_updated"),
+        ("PagerDuty — critical alerts", "https://events.pagerduty.com/generic/abc", "project_delayed,budget_exceeded"),
+    ]:
+        client.post("/api/webhooks", headers=headers, json={"name": name, "url": url, "events": events})
+
+    for name in ["GitHub Actions CI", "Production monitoring bot", "Analytics ingestion service"]:
+        client.post("/api/api-keys", headers=headers, json={"name": name})
+
+    for name, endpoint, freq in [
+        ("Weekly Executive Summary", "/api/reports/summary", "weekly"),
+        ("Monthly Portfolio Health", "/api/reports/performance", "monthly"),
+        ("Daily Sales Pipeline", "/api/crm/forecast", "daily"),
+    ]:
+        client.post("/api/scheduled-reports", headers=headers, json={
+            "name": name, "endpoint": endpoint, "frequency": freq,
+            "recipients": "exec-team@ourcompany.com",
+        })
+
+    for name, widgets in [
+        ("Executive Dashboard", [
+            {"title": "Total revenue", "widget_type": "stat", "endpoint": "/api/crm/dashboard", "json_path": "won_value", "position": 0},
+            {"title": "Active projects", "widget_type": "stat", "endpoint": "/api/projects/", "position": 1},
+            {"title": "Pipeline value", "widget_type": "stat", "endpoint": "/api/crm/dashboard", "json_path": "pipeline_value", "position": 2},
+        ]),
+        ("Sales Dashboard", [
+            {"title": "Companies", "widget_type": "stat", "endpoint": "/api/crm/dashboard", "json_path": "companies", "position": 0},
+            {"title": "Active leads", "widget_type": "stat", "endpoint": "/api/crm/dashboard", "json_path": "active_leads", "position": 1},
+            {"title": "Open opportunities", "widget_type": "stat", "endpoint": "/api/crm/dashboard", "json_path": "open_opportunities", "position": 2},
+        ]),
+    ]:
+        client.post("/api/dashboards", headers=headers, json={"name": name, "is_shared": True, "widgets": widgets})
+
+    # SSO providers
+    for name, ptype in [("Okta (Production)", "oidc"), ("Azure AD (Corporate)", "oidc"), ("Google Workspace", "saml")]:
+        client.post("/api/sso/providers", headers=headers, json={
+            "name": name, "provider_type": ptype,
+            "client_id": fake.uuid4(),
+            "metadata_url": f"https://{name.lower().replace(' ', '')}.example.com/metadata",
+        })
+
+    log("Created 3 webhooks, 3 API keys, 3 scheduled reports, 2 dashboards, 3 SSO providers")
+
+    # Workspaces
+    print("\n[W 14/15] Workspaces + approvals...")
+    for name, slug, desc in [
+        ("Corporate HQ", "corp-hq", "Main workspace for HQ teams"),
+        ("EMEA Region", "emea", "European regional workspace"),
+        ("APAC Region", "apac", "Asia-Pacific regional workspace"),
+    ]:
+        client.post("/api/workspaces", headers=headers, json={"name": name, "slug": slug, "description": desc})
+
+    # Approvals — against expenses
+    expenses_in = client.get("/api/erp/expenses", headers=headers).json()[:8]
+    approval_count = 0
+    for e in expenses_in:
+        r = client.post("/api/approvals", headers=headers, json={
+            "target_type": "expense", "target_id": e["id"],
+            "threshold_amount": e.get("amount", 0),
+            "note": random.choice(["Needs exec sign-off", "Above threshold", "Cross-department approval required"]),
+        })
+        if r.status_code == 201: approval_count += 1
+    log(f"Created 3 workspaces, {approval_count} approval requests")
+
+    # ── DMS: extras (annotations, locks, shares, scans, e-sign, links, folder perms) ──
+    print("\n[W extra] DMS — annotations, locks, shares, scans, e-sign providers, entity links, folder perms...")
+    docs_all = client.get("/api/dms/documents", headers=headers).json()
+    # Annotations
+    ann_count = 0
+    for d in docs_all[:8]:
+        for _ in range(random.randint(1, 3)):
+            r = client.post("/api/dms/annotations", headers=headers, json={
+                "document_id": d["id"], "body": fake.sentence(nb_words=12),
+            })
+            if r.status_code == 201: ann_count += 1
+    # Locks — checkout a few docs
+    lock_count = 0
+    for d in docs_all[2:5]:
+        r = client.post(f"/api/dms/documents/{d['id']}/checkout", headers=headers, json={
+            "note": "Editing for Q3 revision",
+        })
+        if r.status_code in (200, 201): lock_count += 1
+    # Share links
+    share_count = 0
+    for d in docs_all[:5]:
+        r = client.post(f"/api/dms/documents/{d['id']}/share", headers=headers, json={
+            "expires_in_days": random.choice([7, 14, 30]),
+        })
+        if r.status_code == 201: share_count += 1
+    # E-sign providers
+    esign_count = 0
+    for name, ptype in [("DocuSign", "docusign"), ("HelloSign", "hellosign"), ("Adobe Sign", "adobesign")]:
+        r = client.post("/api/dms/esign-providers", headers=headers, json={
+            "name": name, "provider_type": ptype,
+            "api_key": fake.uuid4(), "account_id": fake.uuid4(),
+        })
+        if r.status_code == 201: esign_count += 1
+    # Scan version results
+    scan_count = 0
+    for d in docs_all[:4]:
+        versions = client.get(f"/api/dms/documents/{d['id']}/versions", headers=headers).json()
+        if versions:
+            r = client.post(f"/api/dms/versions/{versions[0]['id']}/scan", headers=headers)
+            if r.status_code in (200, 201): scan_count += 1
+    # Entity links (link docs to opportunities / companies)
+    el_count = 0
+    opps_all = client.get("/api/crm/opportunities", headers=headers).json()
+    for d in docs_all[:6]:
+        target = random.choice(opps_all[:20]) if opps_all else None
+        if not target: break
+        r = client.post("/api/dms/entity-links", headers=headers, json={
+            "document_id": d["id"],
+            "entity_type": "opportunity",
+            "entity_id": target["id"],
+        })
+        if r.status_code == 201: el_count += 1
+    # Folder permissions — grant admin explicit read on first folder (makes it "restricted")
+    folders_all = client.get("/api/dms/folders", headers=headers).json()
+    admin_users = client.get("/api/admin/users", headers=headers).json()
+    fp_count = 0
+    if folders_all and admin_users:
+        for u in admin_users:
+            r = client.post("/api/dms/folders/permissions", headers=headers, json={
+                "folder_id": folders_all[0]["id"],
+                "user_id": u["id"],
+                "permission": "admin",
+            })
+            if r.status_code == 201: fp_count += 1
+    log(f"Created {ann_count} annotations, {lock_count} locks, {share_count} share links, {esign_count} e-sign providers, {scan_count} scan results, {el_count} entity links, {fp_count} folder perms")
+
+    # ── Project templates (save one project as reusable template) ───
+    pt_count = 0
+    if project_ids:
+        r = client.post("/api/templates/", headers=headers, json={
+            "name": "Standard Enterprise Project Template",
+            "description": "Captured from a representative enterprise program",
+            "source_project_id": project_ids[0],
+        })
+        if r.status_code == 201: pt_count += 1
+    log(f"Created {pt_count} project templates")
+
+    # ── CRM: Campaign members ───────────────────────────────────────
+    print("\n[W extra] Campaign members, custom fields, notifications, baselines...")
+    campaigns = client.get("/api/crm/campaigns", headers=headers).json()
+    leads = client.get("/api/crm/leads", headers=headers).json()
+    cm_count = 0
+    for camp in campaigns[:6]:
+        for lead in random.sample(leads, min(8, len(leads))):
+            r = client.post(f"/api/crm/campaigns/{camp['id']}/members", headers=headers, json={
+                "lead_id": lead["id"],
+            })
+            if r.status_code == 201: cm_count += 1
+
+    # Custom fields — per project (entity_type must be task|risk|deliverable)
+    cf_count = 0
+    for pid in project_ids[:6]:
+        for name, ftype, entity in [
+            ("Business Unit", "text", "task"),
+            ("Executive Sponsor", "text", "task"),
+            ("Strategic Priority", "select", "risk"),
+            ("Risk Appetite", "select", "risk"),
+            ("Delivery Phase", "text", "deliverable"),
+        ]:
+            r = client.post("/api/custom-fields/", headers=headers, json={
+                "project_id": pid, "name": name, "field_type": ftype, "entity_type": entity,
+            })
+            if r.status_code == 201: cf_count += 1
+
+    # Schedule baselines per project — name is a query-string param
+    baseline_count = 0
+    for pid in project_ids[:6]:
+        from urllib.parse import quote
+        bname = f"Baseline v{random.randint(1, 3)} — {datetime.utcnow().date()}"
+        r = client.post(f"/api/projects/{pid}/baselines?name={quote(bname)}", headers=headers)
+        if r.status_code == 201: baseline_count += 1
+
+    log(f"Created {cm_count} campaign members, {cf_count} custom fields, {baseline_count} baselines")
+
+    # ── ACL: add seed admin + dimitris to Admins group; project members ──
+    print("\n[W 15/15] ACL: group membership + project members...")
+    groups = client.get("/api/admin/acl/groups", headers=headers).json()
+    admins_group = next((g for g in groups if g["name"] == "Admins"), None)
+    users = client.get("/api/admin/users", headers=headers).json()
+    admin_users = [u for u in users if u["role"] == "admin"]
+    if admins_group:
+        for u in admin_users:
+            client.put(f"/api/admin/acl/users/{u['id']}/groups", headers=headers, json={"group_ids": [admins_group["id"]]})
+    log(f"Added {len(admin_users)} admin users to the Admins group")
+
+    # Project members — add each admin as member of each project
+    pm_count = 0
+    for p in projects[:6]:
+        for u in admin_users:
+            r = client.post(f"/api/projects/{p['id']}/members", headers=headers, json={
+                "user_id": u["id"], "role": "project_manager",
+            })
+            if r.status_code == 201: pm_count += 1
+    log(f"Created {pm_count} project memberships")
+
+
 def _seed_large_project(client: httpx.Client, headers: dict, tmpl: dict, proj_idx: int):
     """Seed a single large project using its embedded templates. Scales counts up."""
     meta = tmpl["meta"]
@@ -1709,7 +2380,7 @@ def _promote_to_admin(email: str) -> bool:
         return False
 
 
-def run(base_url: str, skip_small: bool = False, skip_large: bool = False, skip_enterprise: bool = False):
+def run(base_url: str, skip_small: bool = False, skip_large: bool = False, skip_enterprise: bool = False, skip_wider: bool = False):
     client = httpx.Client(base_url=base_url, timeout=30)
 
     # ── 1. Create / reuse seed admin account ──────────────────────────
@@ -2068,6 +2739,10 @@ def run(base_url: str, skip_small: bool = False, skip_large: bool = False, skip_
         for i, ltmpl in enumerate(LARGE_PROJECTS):
             _seed_large_project(client, headers, ltmpl, i)
 
+    # ── Wider data (DMS, ERP ledger/ops, Admin cross-cutting, ACL) ───
+    if not skip_wider:
+        _seed_wider_data(client, headers)
+
     # ── Summary ──────────────────────────────────────────────────────
     total_small = 0 if skip_small else NUM_PROJECTS
     total_large = 0 if skip_large else len(LARGE_PROJECTS)
@@ -2089,5 +2764,6 @@ if __name__ == "__main__":
     parser.add_argument("--no-small", action="store_true", help="Skip the 3 small software projects")
     parser.add_argument("--no-large", action="store_true", help="Skip the 3 large projects (construction / stadium / banking)")
     parser.add_argument("--no-enterprise", action="store_true", help="Skip enterprise CRM/ERP data (Microsoft, SAP, Oracle, etc.)")
+    parser.add_argument("--no-wider", action="store_true", help="Skip DMS content, ERP ledger/ops, Admin/cross-cutting, ACL membership")
     args = parser.parse_args()
-    run(args.base_url, skip_small=args.no_small, skip_large=args.no_large, skip_enterprise=args.no_enterprise)
+    run(args.base_url, skip_small=args.no_small, skip_large=args.no_large, skip_enterprise=args.no_enterprise, skip_wider=args.no_wider)
