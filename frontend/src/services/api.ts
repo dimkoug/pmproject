@@ -442,8 +442,43 @@ export const apiSlice = createApi({
       query: ({ folderId, projectId }) => `/dms/documents?${folderId ? `folder_id=${folderId}` : ""}${projectId ? `&project_id=${projectId}` : ""}`,
     }),
     getDocVersions: builder.query<any[], string>({ query: (docId) => `/dms/documents/${docId}/versions` }),
-    searchDocuments: builder.query<any[], { q: string; fullText?: boolean }>({
-      query: ({ q, fullText }) => `/dms/search?q=${encodeURIComponent(q)}${fullText ? "&full_text=true" : ""}`,
+    searchDocuments: builder.query<any[], {
+      q: string; fullText?: boolean;
+      dateFrom?: string; dateTo?: string; status?: string; authorId?: string; fileType?: string;
+    }>({
+      query: ({ q, fullText, dateFrom, dateTo, status, authorId, fileType }) => {
+        const p = new URLSearchParams({ q });
+        if (fullText) p.set("full_text", "true");
+        if (dateFrom) p.set("date_from", dateFrom);
+        if (dateTo) p.set("date_to", dateTo);
+        if (status) p.set("status", status);
+        if (authorId) p.set("author_id", authorId);
+        if (fileType) p.set("file_type", fileType);
+        return `/dms/search?${p}`;
+      },
+    }),
+    getExpiringDocuments: builder.query<any[], number | void>({
+      query: (days) => `/dms/documents/expiring?days=${days || 30}`,
+    }),
+    restoreDocVersion: builder.mutation<any, { docId: string; version: number }>({
+      query: ({ docId, version }) => ({
+        url: `/dms/documents/${docId}/versions/${version}/restore`, method: "POST",
+      }),
+    }),
+    getDocShareLinks: builder.query<any[], string>({
+      query: (docId) => `/dms/documents/${docId}/share`,
+    }),
+    createDocShareLink: builder.mutation<any, { docId: string; expires_in_days?: number | null }>({
+      query: ({ docId, ...body }) => ({ url: `/dms/documents/${docId}/share`, method: "POST", body }),
+    }),
+    revokeDocShareLink: builder.mutation<void, string>({
+      query: (linkId) => ({ url: `/dms/share/${linkId}`, method: "DELETE" }),
+    }),
+    getDmsUsageReport: builder.query<any, number | void>({
+      query: (days) => `/dms/reports/usage?days=${days || 30}`,
+    }),
+    getDmsPendingApprovals: builder.query<any, void>({
+      query: () => `/dms/reports/pending-approvals`,
     }),
 
     // ── ERP extensions ──
@@ -841,6 +876,13 @@ export const {
   useGetDocumentsQuery,
   useGetDocVersionsQuery,
   useSearchDocumentsQuery,
+  useGetExpiringDocumentsQuery,
+  useRestoreDocVersionMutation,
+  useGetDocShareLinksQuery,
+  useCreateDocShareLinkMutation,
+  useRevokeDocShareLinkMutation,
+  useGetDmsUsageReportQuery,
+  useGetDmsPendingApprovalsQuery,
   // ERP extensions
   useGetBudgetsQuery,
   useCreateBudgetMutation,

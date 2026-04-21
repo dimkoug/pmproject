@@ -14,6 +14,12 @@ aiofiles==24.1.0
 fpdf2==2.8.2
 httpx==0.28.1
 pypdf==5.1.0
+# --- Optional OCR (enable with DMS_OCR_ENABLED=1) ---
+pytesseract==0.3.13
+Pillow==10.4.0
+pdf2image==1.17.0
+# --- Optional S3 storage (enable with DMS_STORAGE=s3) ---
+boto3==1.35.97
 # --- Concurrency & scaling ---
 redis[hiredis]==5.2.1
 celery[redis]==5.4.0

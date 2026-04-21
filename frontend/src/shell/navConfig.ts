@@ -120,7 +120,7 @@ export const APPS: AppDef[] = [
     accent: "#ede9fe",
     description: "Files, workflows, and signatures",
     groups: [
-      { items: [
+      { title: "Library", items: [
         { to: "/documents", label: "Files", end: true },
         { to: "/documents/signatures", label: "Signatures" },
         { to: "/documents/templates", label: "Templates" },
@@ -129,6 +129,10 @@ export const APPS: AppDef[] = [
         { to: "/documents/locks", label: "Checked Out" },
         { to: "/documents/annotations", label: "Annotations" },
         { to: "/documents/scans", label: "Scans" },
+      ]},
+      { title: "Reports", items: [
+        { to: "/documents/reports/usage", label: "Usage" },
+        { to: "/documents/reports/pending", label: "Pending Approvals" },
       ]},
     ],
   },

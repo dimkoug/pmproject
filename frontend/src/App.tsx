@@ -74,6 +74,8 @@ import LocksPage from "./pages/documents/LocksPage";
 import WorkflowsPage from "./pages/documents/WorkflowsPage";
 import AnnotationsPage from "./pages/documents/AnnotationsPage";
 import ScansPage from "./pages/documents/ScansPage";
+import UsageReportPage from "./pages/documents/UsageReportPage";
+import PendingApprovalsPage from "./pages/documents/PendingApprovalsPage";
 import AdminPage from "./pages/AdminPage";
 import AclGroupsPage from "./pages/admin/AclGroupsPage";
 import AclPermissionsPage from "./pages/admin/AclPermissionsPage";
@@ -172,6 +174,8 @@ export default function App() {
             <Route path="workflows" element={<WorkflowsPage />} />
             <Route path="annotations" element={<AnnotationsPage />} />
             <Route path="scans" element={<ScansPage />} />
+            <Route path="reports/usage" element={<UsageReportPage />} />
+            <Route path="reports/pending" element={<PendingApprovalsPage />} />
           </Route>
         </Route>
 

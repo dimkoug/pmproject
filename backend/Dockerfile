@@ -2,7 +2,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libpq-dev \
+    # Optional OCR dependencies — present in the image, only used when
+    # DMS_OCR_ENABLED=1 is set. Adds ~120MB. Remove this block if you
+    # never plan to OCR scanned images.
+    tesseract-ocr poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

@@ -43,7 +43,10 @@
       "Bash(docker:*)",
       "Bash(netstat:*)",
       "Bash(npx vite *)",
-      "Bash(grep -n \"^  }\\),$\\\\|^}\\);\" C:/Users/jimmy/django_projects_windows/pmproject/frontend/src/services/api.ts)"
+      "Bash(grep -n \"^  }\\),$\\\\|^}\\);\" C:/Users/jimmy/django_projects_windows/pmproject/frontend/src/services/api.ts)",
+      "Bash(grep -nA 12 \"class Notification\" C:/Users/jimmy/django_projects_windows/pmproject/backend/app/models/notification.py)",
+      "Bash(grep -nA 5 \"folders/permissions.*status_code=201\\\\|class FolderPermissionCreate\" C:/Users/jimmy/django_projects_windows/pmproject/backend/app/routers/dms.py)",
+      "Bash(TEST_DB=1 python -m pytest tests/test_projects.py -x --tb=line)"
     ]
   }
 }

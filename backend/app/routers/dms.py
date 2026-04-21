@@ -16,35 +16,106 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.acl.resolver import require_permission
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.user import UserRole
+from app.services.audit import log_audit
+from app.services.storage import get_storage
+
+
+async def _restricted_folder_ids(db: AsyncSession) -> set:
+    """Return the set of folder IDs that have at least one FolderPermission row.
+    Those folders are treated as private — visible only to users listed in them.
+    Folders with no rows are shared by default."""
+    rows = await db.execute(select(FolderPermission.folder_id).distinct())
+    return {r for r in rows.scalars().all()}
+
+
+async def _user_folder_ids(db: AsyncSession, user_id) -> set:
+    """Folder IDs the given user has an explicit permission on."""
+    rows = await db.execute(
+        select(FolderPermission.folder_id).where(FolderPermission.user_id == user_id)
+    )
+    return {r for r in rows.scalars().all()}
+
+
+async def _can_see_folder(db: AsyncSession, user, folder) -> bool:
+    """True if user can see the folder per FolderPermission rules."""
+    if user.role == UserRole.ADMIN:
+        return True
+    if folder.created_by_id == user.id:
+        return True
+    restricted = await _restricted_folder_ids(db)
+    if folder.id not in restricted:
+        return True  # public/shared
+    allowed = await _user_folder_ids(db, user.id)
+    return folder.id in allowed
 from app.models.dms import (
     Document, DocumentStatus, DocumentVersion, Folder,
     SignatureRequest, SignatureRequestStatus, DocumentTemplate,
     FolderPermission, RetentionPolicy, RetentionAction, EntityLink, EntityType,
     DocumentLock, DocumentWorkflow, WorkflowStep, WorkflowStepStatus,
     DocumentAnnotation, ESignProvider, ESignProviderType, ScanResult, ScanStatus,
+    DocumentShareLink,
 )
 from app.models.user import User
 
 
+def _ocr_image(content: bytes) -> str | None:
+    """OCR an image with Tesseract. Returns None on any error."""
+    try:
+        import io
+        from PIL import Image  # type: ignore
+        import pytesseract  # type: ignore
+        img = Image.open(io.BytesIO(content))
+        return pytesseract.image_to_string(img)[:200000]
+    except Exception:
+        return None
+
+
+def _ocr_pdf(content: bytes) -> str | None:
+    """Rasterise a PDF with pdf2image and OCR each page."""
+    try:
+        import pytesseract  # type: ignore
+        from pdf2image import convert_from_bytes  # type: ignore
+        images = convert_from_bytes(content, dpi=200)
+        return "\n".join(pytesseract.image_to_string(img) for img in images)[:200000]
+    except Exception:
+        return None
+
+
 def extract_text(content: bytes, content_type: str | None, filename: str) -> str | None:
     """Best-effort text extraction. Returns plain text or None.
-    Plain-text / markdown / csv / json / html: decode directly.
-    PDF: try pypdf if available.
-    Otherwise: None.
+
+    Plain-text / markdown / csv / json / html — decode directly.
+    PDF — try pypdf first; if that yields nothing and OCR is enabled, rasterise
+    and run Tesseract over each page (slow, but handles scanned PDFs).
+    Images — Tesseract OCR when DMS_OCR_ENABLED=1.
     """
     ct = (content_type or "").lower()
     name = (filename or "").lower()
+    ocr_on = os.environ.get("DMS_OCR_ENABLED") == "1"
+
     try:
         if ct.startswith("text/") or name.endswith((".txt", ".md", ".csv", ".json", ".html", ".xml", ".log")):
             return content.decode("utf-8", errors="ignore")[:200000]
+
         if ct == "application/pdf" or name.endswith(".pdf"):
             try:
                 from pypdf import PdfReader  # type: ignore
                 import io
                 reader = PdfReader(io.BytesIO(content))
-                return "\n".join((p.extract_text() or "") for p in reader.pages)[:200000]
+                text = "\n".join((p.extract_text() or "") for p in reader.pages)[:200000]
+                if text.strip():
+                    return text
+                # Fallback to OCR for scanned PDFs with no embedded text
+                if ocr_on:
+                    return _ocr_pdf(content)
             except Exception:
+                if ocr_on:
+                    return _ocr_pdf(content)
                 return None
+
+        if ocr_on and (ct.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif"))):
+            return _ocr_image(content)
     except Exception:
         return None
     return None
@@ -61,14 +132,21 @@ class FolderCreate(BaseModel):
     project_id: UUID | None = None; parent_id: UUID | None = None; name: str; description: str | None = None
 
 @router.get("/folders")
-async def list_folders(project_id: UUID | None = None, parent_id: UUID | None = None, db: AsyncSession = Depends(get_db)):
+async def list_folders(project_id: UUID | None = None, parent_id: UUID | None = None, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     q = select(Folder).order_by(Folder.name)
     if project_id: q = q.where(Folder.project_id == project_id)
     if parent_id: q = q.where(Folder.parent_id == parent_id)
     else: q = q.where(Folder.parent_id.is_(None))
     result = await db.execute(q)
+    # Folder visibility: admin bypass, creator bypass, otherwise must either
+    # be a shared folder (no FolderPermission rows) or have an explicit grant.
+    restricted = await _restricted_folder_ids(db) if current_user.role != UserRole.ADMIN else set()
+    allowed = await _user_folder_ids(db, current_user.id) if current_user.role != UserRole.ADMIN else set()
     folders = []
     for f in result.scalars().all():
+        if current_user.role != UserRole.ADMIN and f.created_by_id != current_user.id:
+            if f.id in restricted and f.id not in allowed:
+                continue
         doc_count = await db.scalar(select(func.count(Document.id)).where(Document.folder_id == f.id)) or 0
         sub_count = await db.scalar(select(func.count(Folder.id)).where(Folder.parent_id == f.id)) or 0
         folders.append({"id": str(f.id), "name": f.name, "description": f.description, "parent_id": str(f.parent_id) if f.parent_id else None, "doc_count": doc_count, "subfolder_count": sub_count, "created_at": f.created_at.isoformat()})
@@ -81,9 +159,11 @@ async def create_folder(p: FolderCreate, current_user: User = Depends(get_curren
     return {"id": str(f.id), "name": f.name}
 
 @router.delete("/folders/{folder_id}", status_code=204, dependencies=[Depends(require_permission("documents.folder.manage"))])
-async def delete_folder(folder_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_folder(folder_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     f = await db.get(Folder, folder_id)
     if not f: raise HTTPException(404, "Folder not found")
+    await log_audit(db, current_user, domain="dms", action="delete", entity_type="folder", entity_id=f.id,
+                    before={"name": f.name, "project_id": str(f.project_id) if f.project_id else None})
     await db.delete(f); await db.commit()
 
 
@@ -93,6 +173,7 @@ async def delete_folder(folder_id: UUID, db: AsyncSession = Depends(get_db)):
 async def list_documents(
     folder_id: UUID | None = None, project_id: UUID | None = None,
     status: str | None = None, tag: str | None = None,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(Document).order_by(Document.updated_at.desc()).limit(200)
@@ -101,10 +182,16 @@ async def list_documents(
     if status: q = q.where(Document.status == DocumentStatus(status))
     if tag: q = q.where(Document.tags.ilike(f"%{tag}%"))
     result = await db.execute(q)
-    return [
-        {"id": str(d.id), "title": d.title, "description": d.description, "tags": d.tags, "status": d.status.value, "current_version": d.current_version, "folder_id": str(d.folder_id) if d.folder_id else None, "updated_at": d.updated_at.isoformat()}
-        for d in result.scalars().all()
-    ]
+    restricted = await _restricted_folder_ids(db) if current_user.role != UserRole.ADMIN else set()
+    allowed = await _user_folder_ids(db, current_user.id) if current_user.role != UserRole.ADMIN else set()
+    docs = []
+    for d in result.scalars().all():
+        # Docs in a restricted folder: user needs an explicit grant (or ADMIN / creator).
+        if current_user.role != UserRole.ADMIN and d.folder_id and d.folder_id in restricted:
+            if d.folder_id not in allowed and d.created_by_id != current_user.id:
+                continue
+        docs.append({"id": str(d.id), "title": d.title, "description": d.description, "tags": d.tags, "status": d.status.value, "current_version": d.current_version, "folder_id": str(d.folder_id) if d.folder_id else None, "updated_at": d.updated_at.isoformat()})
+    return docs
 
 @router.post("/documents", status_code=201, dependencies=[Depends(require_permission("documents.file.upload"))])
 async def create_document(
@@ -114,6 +201,7 @@ async def create_document(
     folder_id: str = Form(None),
     description: str = Form(None),
     tags: str = Form(None),
+    expiry_date: str = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -122,6 +210,7 @@ async def create_document(
         project_id=UUID(project_id) if project_id and project_id != "null" else None,
         folder_id=UUID(folder_id) if folder_id and folder_id != "null" else None,
         title=title, description=description, tags=tags,
+        expiry_date=datetime.fromisoformat(expiry_date) if expiry_date else None,
         created_by_id=current_user.id, current_version=1,
     )
     db.add(doc); await db.flush()
@@ -130,10 +219,8 @@ async def create_document(
     file_id = str(uuid_mod.uuid4())
     ext = os.path.splitext(file.filename or "")[1]
     stored_name = f"{file_id}{ext}"
-    path = os.path.join(UPLOAD_DIR, stored_name)
     content = await file.read()
-    with open(path, "wb") as f:
-        f.write(content)
+    get_storage().put(stored_name, content)
 
     ver = DocumentVersion(
         document_id=doc.id, version_number=1, filename=stored_name,
@@ -141,7 +228,10 @@ async def create_document(
         size_bytes=len(content), uploaded_by_id=current_user.id,
         content_text=extract_text(content, file.content_type, file.filename or ""),
     )
-    db.add(ver); await db.commit(); await db.refresh(doc)
+    db.add(ver)
+    await log_audit(db, current_user, domain="dms", action="upload", entity_type="document", entity_id=doc.id,
+                    after={"title": title, "size": len(content), "filename": file.filename})
+    await db.commit(); await db.refresh(doc)
     return {"id": str(doc.id), "title": doc.title, "version": 1}
 
 @router.post("/documents/{doc_id}/versions", status_code=201, dependencies=[Depends(require_permission("documents.file.upload"))])
@@ -159,10 +249,8 @@ async def upload_new_version(
     file_id = str(uuid_mod.uuid4())
     ext = os.path.splitext(file.filename or "")[1]
     stored_name = f"{file_id}{ext}"
-    path = os.path.join(UPLOAD_DIR, stored_name)
     content = await file.read()
-    with open(path, "wb") as f:
-        f.write(content)
+    get_storage().put(stored_name, content)
 
     ver = DocumentVersion(
         document_id=doc.id, version_number=new_ver_num, filename=stored_name,
@@ -172,8 +260,50 @@ async def upload_new_version(
     )
     db.add(ver)
     doc.current_version = new_ver_num
+    await log_audit(db, current_user, domain="dms", action="version_upload", entity_type="document", entity_id=doc.id,
+                    after={"version": new_ver_num, "size": len(content), "change_notes": change_notes})
     await db.commit()
     return {"id": str(doc.id), "version": new_ver_num}
+
+@router.post("/documents/{doc_id}/versions/{version_number}/restore", dependencies=[Depends(require_permission("documents.file.upload"))])
+async def restore_version(doc_id: UUID, version_number: int, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Promote an older version to the current one by creating a new numbered
+    version whose file is a copy of the old file. History stays linear."""
+    doc = await db.get(Document, doc_id)
+    if not doc: raise HTTPException(404, "Document not found")
+    src = (await db.execute(
+        select(DocumentVersion).where(
+            DocumentVersion.document_id == doc_id,
+            DocumentVersion.version_number == version_number,
+        )
+    )).scalar_one_or_none()
+    if not src: raise HTTPException(404, f"Version {version_number} not found")
+
+    storage = get_storage()
+    src_path = storage.get_path(src.filename)
+    if not src_path: raise HTTPException(404, "Source file missing on storage")
+
+    new_ver_num = doc.current_version + 1
+    file_id = str(uuid_mod.uuid4())
+    ext = os.path.splitext(src.original_name or src.filename)[1]
+    new_filename = f"{file_id}{ext}"
+    with open(src_path, "rb") as rf:
+        storage.put(new_filename, rf.read())
+
+    ver = DocumentVersion(
+        document_id=doc.id, version_number=new_ver_num, filename=new_filename,
+        original_name=src.original_name, content_type=src.content_type,
+        size_bytes=src.size_bytes, content_text=src.content_text,
+        change_notes=f"Restored from v{version_number}",
+        uploaded_by_id=current_user.id,
+    )
+    db.add(ver)
+    doc.current_version = new_ver_num
+    await log_audit(db, current_user, domain="dms", action="restore_version", entity_type="document", entity_id=doc.id,
+                    before={"from_version": version_number}, after={"to_version": new_ver_num})
+    await db.commit()
+    return {"id": str(doc.id), "current_version": new_ver_num, "restored_from": version_number}
+
 
 @router.get("/documents/{doc_id}/versions")
 async def list_versions(doc_id: UUID, db: AsyncSession = Depends(get_db)):
@@ -187,9 +317,13 @@ async def list_versions(doc_id: UUID, db: AsyncSession = Depends(get_db)):
     ]
 
 @router.get("/documents/{doc_id}/download")
-async def download_document(doc_id: UUID, version: int | None = None, db: AsyncSession = Depends(get_db)):
+async def download_document(doc_id: UUID, version: int | None = None, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     doc = await db.get(Document, doc_id)
     if not doc: raise HTTPException(404, "Document not found")
+    if doc.folder_id and current_user.role != UserRole.ADMIN and doc.created_by_id != current_user.id:
+        folder = await db.get(Folder, doc.folder_id)
+        if folder and not await _can_see_folder(db, current_user, folder):
+            raise HTTPException(403, "No access to this folder")
 
     q = select(DocumentVersion).where(DocumentVersion.document_id == doc_id)
     if version: q = q.where(DocumentVersion.version_number == version)
@@ -198,53 +332,113 @@ async def download_document(doc_id: UUID, version: int | None = None, db: AsyncS
     ver = (await db.execute(q)).scalar_one_or_none()
     if not ver: raise HTTPException(404, "Version not found")
 
-    path = os.path.join(UPLOAD_DIR, ver.filename)
-    if not os.path.exists(path): raise HTTPException(404, "File not found on disk")
+    path = get_storage().get_path(ver.filename)
+    if not path: raise HTTPException(404, "File not found on storage")
+    await log_audit(db, current_user, domain="dms", action="download", entity_type="document", entity_id=doc.id,
+                    after={"version": ver.version_number, "filename": ver.original_name})
+    await db.commit()
     return FileResponse(path, filename=ver.original_name, media_type=ver.content_type)
 
 @router.patch("/documents/{doc_id}")
-async def update_document(doc_id: UUID, title: str | None = None, status: str | None = None, tags: str | None = None, description: str | None = None, db: AsyncSession = Depends(get_db)):
+async def update_document(doc_id: UUID, title: str | None = None, status: str | None = None, tags: str | None = None, description: str | None = None, expiry_date: str | None = None, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     doc = await db.get(Document, doc_id)
     if not doc: raise HTTPException(404, "Document not found")
+    before = {"title": doc.title, "status": doc.status.value, "tags": doc.tags, "description": doc.description, "expiry_date": doc.expiry_date.isoformat() if doc.expiry_date else None}
     if title: doc.title = title
     if status: doc.status = DocumentStatus(status)
     if tags is not None: doc.tags = tags
     if description is not None: doc.description = description
+    if expiry_date is not None: doc.expiry_date = datetime.fromisoformat(expiry_date) if expiry_date else None
+    after = {"title": doc.title, "status": doc.status.value, "tags": doc.tags, "description": doc.description, "expiry_date": doc.expiry_date.isoformat() if doc.expiry_date else None}
+    await log_audit(db, current_user, domain="dms", action="update", entity_type="document", entity_id=doc.id, before=before, after=after)
     await db.commit()
     return {"id": str(doc.id), "title": doc.title, "status": doc.status.value}
 
 @router.delete("/documents/{doc_id}", status_code=204, dependencies=[Depends(require_permission("documents.file.delete"))])
-async def delete_document(doc_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_document(doc_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     doc = await db.get(Document, doc_id)
     if not doc: raise HTTPException(404, "Document not found")
-    # Delete file versions from disk
+    # Delete file versions from storage
     versions = (await db.execute(select(DocumentVersion).where(DocumentVersion.document_id == doc_id))).scalars().all()
+    storage = get_storage()
     for v in versions:
-        path = os.path.join(UPLOAD_DIR, v.filename)
-        if os.path.exists(path): os.remove(path)
+        storage.delete(v.filename)
+    await log_audit(db, current_user, domain="dms", action="delete", entity_type="document", entity_id=doc.id,
+                    before={"title": doc.title, "versions": len(versions)})
     await db.delete(doc); await db.commit()
+
+
+# ── Expiring documents ──────────────────────────────────────────────
+
+@router.get("/documents/expiring")
+async def expiring_documents(
+    days: int = Query(30, ge=1, le=365),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Docs with an expiry_date within `days` days from now."""
+    cutoff = datetime.utcnow() + timedelta(days=days)
+    q = select(Document).where(
+        Document.expiry_date.is_not(None),
+        Document.expiry_date <= cutoff,
+    ).order_by(Document.expiry_date)
+    result = await db.execute(q)
+    return [
+        {"id": str(d.id), "title": d.title, "expiry_date": d.expiry_date.isoformat(),
+         "status": d.status.value, "created_by_id": str(d.created_by_id) if d.created_by_id else None}
+        for d in result.scalars().all()
+    ]
 
 
 # ── Search ──────────────────────────────────────────────────────────
 
 @router.get("/search")
-async def search_documents(q: str = Query(..., min_length=1), full_text: bool = False, db: AsyncSession = Depends(get_db)):
+async def search_documents(
+    q: str = Query(..., min_length=1),
+    full_text: bool = False,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    status: str | None = None,
+    author_id: UUID | None = None,
+    file_type: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Search with optional filters.
+
+    * `full_text=true` matches the extracted `content_text` on any version.
+    * `date_from` / `date_to` filter by `Document.updated_at`.
+    * `status` must be one of draft / review / approved / archived.
+    * `author_id` filters by `created_by_id`.
+    * `file_type` prefix-matches the *latest* version's content_type
+      (e.g. `application/pdf` or `image/` for all images).
+    """
     pattern = f"%{q}%"
+    filters = [or_(Document.title.ilike(pattern), Document.tags.ilike(pattern), Document.description.ilike(pattern))]
+
     if full_text:
-        # Match on extracted content via latest version
         sub = select(DocumentVersion.document_id).where(DocumentVersion.content_text.ilike(pattern)).distinct()
-        result = await db.execute(
-            select(Document).where(or_(
-                Document.title.ilike(pattern), Document.tags.ilike(pattern), Document.description.ilike(pattern),
-                Document.id.in_(sub),
-            )).order_by(Document.updated_at.desc()).limit(50)
+        filters = [or_(filters[0], Document.id.in_(sub))]
+
+    if date_from: filters.append(Document.updated_at >= date_from)
+    if date_to: filters.append(Document.updated_at <= date_to)
+    if status: filters.append(Document.status == DocumentStatus(status))
+    if author_id: filters.append(Document.created_by_id == author_id)
+    if file_type:
+        # Match on the latest version's content_type
+        latest_subq = (
+            select(DocumentVersion.document_id)
+            .where(DocumentVersion.content_type.ilike(f"{file_type}%"))
+            .distinct()
         )
-    else:
-        result = await db.execute(
-            select(Document).where(or_(Document.title.ilike(pattern), Document.tags.ilike(pattern), Document.description.ilike(pattern)))
-            .order_by(Document.updated_at.desc()).limit(50)
-        )
-    return [{"id": str(d.id), "title": d.title, "tags": d.tags, "status": d.status.value, "folder_id": str(d.folder_id) if d.folder_id else None} for d in result.scalars().all()]
+        filters.append(Document.id.in_(latest_subq))
+
+    result = await db.execute(
+        select(Document).where(*filters).order_by(Document.updated_at.desc()).limit(100)
+    )
+    return [{"id": str(d.id), "title": d.title, "tags": d.tags, "status": d.status.value,
+             "folder_id": str(d.folder_id) if d.folder_id else None,
+             "updated_at": d.updated_at.isoformat()}
+            for d in result.scalars().all()]
 
 
 # ── DMS Dashboard ───────────────────────────────────────────────────
@@ -289,7 +483,10 @@ async def list_signatures(document_id: UUID | None = None, db: AsyncSession = De
 async def request_signature(p: SignatureRequestCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     sig = SignatureRequest(document_id=p.document_id, signer_email=p.signer_email, signer_name=p.signer_name,
                            message=p.message, token=secrets.token_urlsafe(32), requested_by_id=current_user.id)
-    db.add(sig); await db.commit(); await db.refresh(sig)
+    db.add(sig)
+    await log_audit(db, current_user, domain="dms", action="signature_requested", entity_type="document", entity_id=p.document_id,
+                    after={"signer_email": p.signer_email})
+    await db.commit(); await db.refresh(sig)
     return {"id": str(sig.id), "token": sig.token}
 
 @router.post("/signatures/{token}/sign")
@@ -461,16 +658,23 @@ async def delete_entity_link(link_id: UUID, db: AsyncSession = Depends(get_db)):
 # ── Preview (inline media_type for browser view) ───────────────────
 
 @router.get("/documents/{doc_id}/preview")
-async def preview_document(doc_id: UUID, version: int | None = None, db: AsyncSession = Depends(get_db)):
+async def preview_document(doc_id: UUID, version: int | None = None, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     doc = await db.get(Document, doc_id)
     if not doc: raise HTTPException(404, "Document not found")
+    if doc.folder_id and current_user.role != UserRole.ADMIN and doc.created_by_id != current_user.id:
+        folder = await db.get(Folder, doc.folder_id)
+        if folder and not await _can_see_folder(db, current_user, folder):
+            raise HTTPException(403, "No access to this folder")
     q = select(DocumentVersion).where(DocumentVersion.document_id == doc_id)
     if version: q = q.where(DocumentVersion.version_number == version)
     else: q = q.order_by(DocumentVersion.version_number.desc()).limit(1)
     ver = (await db.execute(q)).scalar_one_or_none()
     if not ver: raise HTTPException(404, "Version not found")
-    path = os.path.join(UPLOAD_DIR, ver.filename)
-    if not os.path.exists(path): raise HTTPException(404, "File not found on disk")
+    path = get_storage().get_path(ver.filename)
+    if not path: raise HTTPException(404, "File not found on storage")
+    await log_audit(db, current_user, domain="dms", action="view", entity_type="document", entity_id=doc.id,
+                    after={"version": ver.version_number})
+    await db.commit()
     return FileResponse(path, media_type=ver.content_type or "application/octet-stream")
 
 
@@ -586,6 +790,8 @@ async def advance_workflow(wf_id: UUID, p: WorkflowAdvance, current_user: User =
             w.is_complete = True
             d = await db.get(Document, w.document_id)
             if d: d.status = DocumentStatus.APPROVED
+    await log_audit(db, current_user, domain="dms", action="workflow_advance", entity_type="document", entity_id=w.document_id,
+                    after={"workflow_id": str(w.id), "decision": p.decision, "step": w.current_step, "complete": w.is_complete})
     await db.commit()
     return {"id": str(w.id), "current_step": w.current_step, "is_complete": w.is_complete}
 
@@ -701,3 +907,124 @@ async def list_scan_results(status: str | None = None, db: AsyncSession = Depend
     return [{"id": str(r.id), "version_id": str(r.version_id), "status": r.status.value, "details": r.details,
              "scanned_at": r.scanned_at.isoformat() if r.scanned_at else None}
             for r in result.scalars().all()]
+
+
+# ── Shareable public links ──────────────────────────────────────────
+
+class ShareLinkCreate(BaseModel):
+    expires_in_days: int | None = 7  # None = no expiry
+
+
+@router.post("/documents/{doc_id}/share", status_code=201)
+async def create_share_link(doc_id: UUID, p: ShareLinkCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    doc = await db.get(Document, doc_id)
+    if not doc: raise HTTPException(404, "Document not found")
+    token = secrets.token_urlsafe(32)
+    expires_at = None
+    if p.expires_in_days and p.expires_in_days > 0:
+        expires_at = datetime.utcnow() + timedelta(days=p.expires_in_days)
+    link = DocumentShareLink(document_id=doc_id, token=token, expires_at=expires_at, created_by_id=current_user.id)
+    db.add(link)
+    await log_audit(db, current_user, domain="dms", action="share_link_created", entity_type="document", entity_id=doc.id,
+                    after={"expires_at": expires_at.isoformat() if expires_at else None})
+    await db.commit(); await db.refresh(link)
+    return {"id": str(link.id), "token": token, "expires_at": expires_at.isoformat() if expires_at else None}
+
+
+@router.get("/documents/{doc_id}/share")
+async def list_share_links(doc_id: UUID, db: AsyncSession = Depends(get_db)):
+    rows = (await db.scalars(select(DocumentShareLink).where(DocumentShareLink.document_id == doc_id))).all()
+    return [{"id": str(r.id), "token": r.token, "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+             "download_count": r.download_count, "is_revoked": r.is_revoked, "created_at": r.created_at.isoformat()}
+            for r in rows]
+
+
+@router.delete("/share/{link_id}", status_code=204)
+async def revoke_share_link(link_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    link = await db.get(DocumentShareLink, link_id)
+    if not link: raise HTTPException(404, "Share link not found")
+    link.is_revoked = True
+    await log_audit(db, current_user, domain="dms", action="share_link_revoked", entity_type="document", entity_id=link.document_id)
+    await db.commit()
+
+
+
+# ── Reports ─────────────────────────────────────────────────────────
+
+@router.get("/reports/usage")
+async def report_usage(days: int = Query(30, ge=1, le=365), db: AsyncSession = Depends(get_db)):
+    """Top downloaders and most-accessed documents over the given window,
+    sourced from the global audit log."""
+    from app.models.cross import AuditEntry
+    since = datetime.utcnow() - timedelta(days=days)
+    base = select(AuditEntry).where(
+        AuditEntry.domain == "dms",
+        AuditEntry.action.in_(["download", "view"]),
+        AuditEntry.created_at >= since,
+    )
+
+    # Top downloaders
+    by_user = (await db.execute(
+        select(AuditEntry.user_id, func.count(AuditEntry.id).label("n"))
+        .where(AuditEntry.domain == "dms", AuditEntry.action.in_(["download", "view"]), AuditEntry.created_at >= since)
+        .group_by(AuditEntry.user_id).order_by(func.count(AuditEntry.id).desc()).limit(10)
+    )).all()
+
+    # Most-accessed documents
+    by_doc = (await db.execute(
+        select(AuditEntry.entity_id, func.count(AuditEntry.id).label("n"))
+        .where(AuditEntry.domain == "dms", AuditEntry.action.in_(["download", "view"]), AuditEntry.created_at >= since)
+        .group_by(AuditEntry.entity_id).order_by(func.count(AuditEntry.id).desc()).limit(10)
+    )).all()
+
+    # Resolve doc titles for readability
+    doc_ids = [row[0] for row in by_doc if row[0]]
+    titles: dict[str, str] = {}
+    if doc_ids:
+        docs = await db.scalars(select(Document).where(Document.id.in_([UUID(d) for d in doc_ids])))
+        titles = {str(d.id): d.title for d in docs.all()}
+
+    return {
+        "window_days": days,
+        "top_users": [{"user_id": str(u) if u else None, "actions": n} for u, n in by_user],
+        "top_documents": [{"document_id": d, "title": titles.get(d), "actions": n} for d, n in by_doc],
+    }
+
+
+@router.get("/reports/audit")
+async def report_audit(
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    action: str | None = None,
+    limit: int = Query(500, ge=1, le=5000),
+    db: AsyncSession = Depends(get_db),
+):
+    """Flat DMS audit entries for compliance exports."""
+    from app.models.cross import AuditEntry
+    q = select(AuditEntry).where(AuditEntry.domain == "dms")
+    if date_from: q = q.where(AuditEntry.created_at >= date_from)
+    if date_to: q = q.where(AuditEntry.created_at <= date_to)
+    if action: q = q.where(AuditEntry.action == action)
+    q = q.order_by(AuditEntry.created_at.desc()).limit(limit)
+    rows = (await db.scalars(q)).all()
+    return [{"id": str(e.id), "user_id": str(e.user_id) if e.user_id else None, "action": e.action,
+             "entity_type": e.entity_type, "entity_id": e.entity_id,
+             "created_at": e.created_at.isoformat(),
+             "before": e.before_data, "after": e.after_data}
+            for e in rows]
+
+
+@router.get("/reports/pending-approvals")
+async def report_pending_approvals(db: AsyncSession = Depends(get_db)):
+    """Workflows and signature requests awaiting action."""
+    wfs = (await db.scalars(select(DocumentWorkflow).where(DocumentWorkflow.is_complete == False))).all()  # noqa: E712
+    sigs = (await db.scalars(select(SignatureRequest).where(SignatureRequest.status == SignatureRequestStatus.PENDING))).all()
+    return {
+        "workflows": [{"id": str(w.id), "name": w.name, "document_id": str(w.document_id),
+                       "current_step": w.current_step, "created_at": w.created_at.isoformat()}
+                      for w in wfs],
+        "signatures": [{"id": str(s.id), "document_id": str(s.document_id), "signer_email": s.signer_email,
+                        "created_at": s.created_at.isoformat()}
+                       for s in sigs],
+    }
+

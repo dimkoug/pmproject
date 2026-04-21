@@ -35,6 +35,7 @@ from app.models.dms import (
     Folder, Document, DocumentVersion,
     SignatureRequest, DocumentTemplate, FolderPermission, RetentionPolicy, EntityLink,
     DocumentLock, DocumentWorkflow, WorkflowStep, DocumentAnnotation, ESignProvider, ScanResult,
+    DocumentShareLink,
 )
 from app.models.cross import (
     ApprovalRequest, Webhook, WebhookDelivery, ApiKey,
@@ -64,6 +65,7 @@ __all__ = [
     "Folder", "Document", "DocumentVersion",
     "SignatureRequest", "DocumentTemplate", "FolderPermission", "RetentionPolicy", "EntityLink",
     "DocumentLock", "DocumentWorkflow", "WorkflowStep", "DocumentAnnotation", "ESignProvider", "ScanResult",
+    "DocumentShareLink",
     "ApprovalRequest", "Webhook", "WebhookDelivery", "ApiKey",
     "AuditEntry", "ScheduledReport", "ScheduledReportRun", "Dashboard", "DashboardWidget",
     "SsoProvider", "Workspace", "WorkspaceMember",

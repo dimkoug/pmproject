@@ -28,6 +28,7 @@ from app.routers import (
     erp,
     crm,
     dms,
+    dms_public,
     cross,
     acl,
 )
@@ -36,12 +37,18 @@ from app.websockets.manager import manager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup — serialise DDL across replicas so we never race on create_all
+    from sqlalchemy import text
+    _STARTUP_LOCK_KEY = 73126902
     async with engine.begin() as conn:
+        await conn.execute(text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_STARTUP_LOCK_KEY))
         await conn.run_sync(Base.metadata.create_all)
+    # Additive column migrations for existing tables (also serialised inside)
+    from app.services.migrations import run_additive_migrations
+    await run_additive_migrations()
     # Warm up Redis pool
     await get_redis()
-    # Seed ACL catalog (idempotent)
+    # Seed ACL catalog (idempotent, serialised by its own advisory lock)
     from app.acl.seed import seed_acl
     await seed_acl()
     yield
@@ -89,6 +96,7 @@ app.include_router(advanced.router)
 app.include_router(erp.router)
 app.include_router(crm.router)
 app.include_router(dms.router)
+app.include_router(dms_public.router)
 app.include_router(cross.router)
 app.include_router(acl.router)
 

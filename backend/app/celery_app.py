@@ -3,11 +3,13 @@
 Two queues:
   * `default` — lightweight async work (CSV parsing, quick imports).
   * `reports` — slow/CPU-heavy jobs (PDF generation, Monte Carlo, scheduled
-    report runs, depreciation batches). Served by the dedicated
-    `celery-reports` worker so a long PDF render never blocks short tasks.
+    report runs, depreciation batches, nightly retention / expiry scans).
+    Served by the dedicated `celery-reports` worker so a long PDF render
+    never blocks short tasks.
 """
 
 from celery import Celery
+from celery.schedules import crontab
 from kombu import Queue
 
 from app.config import settings
@@ -43,8 +45,24 @@ celery.conf.update(
         "run_scheduled_reports_task": {"queue": "reports"},
         "run_depreciation_task": {"queue": "reports"},
         "run_recurring_invoices_task": {"queue": "reports"},
+        "run_expiry_reminders_task": {"queue": "reports"},
+        "run_retention_task": {"queue": "reports"},
+    },
+    # Celery Beat schedule — nightly housekeeping.
+    beat_schedule={
+        "dms-expiry-reminders": {
+            "task": "run_expiry_reminders_task",
+            "schedule": crontab(minute=0, hour=1),   # 01:00 UTC daily
+            "kwargs": {"days_ahead": 7},
+        },
+        "dms-retention": {
+            "task": "run_retention_task",
+            "schedule": crontab(minute=0, hour=2),   # 02:00 UTC daily
+        },
     },
 )
 
-# Auto-discover tasks from app.tasks module
+# Auto-discover tasks from app.tasks and app.tasks_dms modules
 celery.autodiscover_tasks(["app"])
+# Explicit import so the task module is registered on worker startup
+import app.tasks_dms  # noqa: F401, E402

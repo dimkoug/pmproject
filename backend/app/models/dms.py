@@ -48,6 +48,7 @@ class Document(Base):
     tags: Mapped[str | None] = mapped_column(String(500))  # comma-separated
     status: Mapped[DocumentStatus] = mapped_column(Enum(DocumentStatus), default=DocumentStatus.DRAFT)
     current_version: Mapped[int] = mapped_column(Integer, default=1)
+    expiry_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -109,6 +110,25 @@ class DocumentTemplate(Base):
     description: Mapped[str | None] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     variables: Mapped[str | None] = mapped_column(Text)
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Shareable Links ─────────────────────────────────────────────────
+
+class DocumentShareLink(Base):
+    __tablename__ = "dms_share_links"
+    __table_args__ = (
+        Index("ix_dms_share_token", "token"),
+        Index("ix_dms_share_doc", "document_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("dms_documents.id", ondelete="CASCADE"), nullable=False)
+    token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    download_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_revoked: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

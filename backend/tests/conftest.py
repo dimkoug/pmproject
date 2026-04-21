@@ -6,8 +6,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.acl.catalog import CATALOG
 from app.database import Base, get_db
 from app.dependencies import get_current_user
+from app.models.acl import Permission
 from app.models.user import User, UserRole
 from app.main import app
 
@@ -49,7 +51,9 @@ def event_loop():
 async def setup_database():
     async with engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    # Insert the test user so FK references work
+    # Seed the ACL catalog so require_permission() succeeds (admin enumerates
+    # all permissions; an empty catalog would block every gated endpoint).
+    # Also insert the admin test user so FK references work.
     async with async_session_test() as session:
         existing = await session.get(User, _test_user_id)
         if not existing:
@@ -57,7 +61,12 @@ async def setup_database():
                 id=_test_user_id, email="test@test.com", name="Test User",
                 hashed_password="fake", role=UserRole.ADMIN, is_active=True,
             ))
-            await session.commit()
+        for spec in CATALOG:
+            session.add(Permission(
+                codename=spec.codename, name=spec.name,
+                description=spec.description, category=spec.category,
+            ))
+        await session.commit()
     yield
     async with engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
