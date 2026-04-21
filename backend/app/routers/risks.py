@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.acl.resolver import require_permission
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.risk import Risk
@@ -29,7 +30,7 @@ async def list_risks(
     return result.scalars().all()
 
 
-@router.post("/", response_model=RiskRead, status_code=201)
+@router.post("/", response_model=RiskRead, status_code=201, dependencies=[Depends(require_permission("projects.risk.manage"))])
 async def create_risk(payload: RiskCreate, db: AsyncSession = Depends(get_db)):
     risk = Risk(**payload.model_dump())
     db.add(risk)
@@ -47,7 +48,7 @@ async def get_risk(risk_id: UUID, db: AsyncSession = Depends(get_db)):
     return risk
 
 
-@router.patch("/{risk_id}", response_model=RiskRead)
+@router.patch("/{risk_id}", response_model=RiskRead, dependencies=[Depends(require_permission("projects.risk.manage"))])
 async def update_risk(risk_id: UUID, payload: RiskUpdate, db: AsyncSession = Depends(get_db)):
     risk = await db.get(Risk, risk_id)
     if not risk:
@@ -60,7 +61,7 @@ async def update_risk(risk_id: UUID, payload: RiskUpdate, db: AsyncSession = Dep
     return risk
 
 
-@router.delete("/{risk_id}", status_code=204)
+@router.delete("/{risk_id}", status_code=204, dependencies=[Depends(require_permission("projects.risk.manage"))])
 async def delete_risk(risk_id: UUID, db: AsyncSession = Depends(get_db)):
     risk = await db.get(Risk, risk_id)
     if not risk:

@@ -42,7 +42,8 @@
       "Bash(pip install:*)",
       "Bash(docker:*)",
       "Bash(netstat:*)",
-      "Bash(npx vite *)"
+      "Bash(npx vite *)",
+      "Bash(grep -n \"^  }\\),$\\\\|^}\\);\" C:/Users/jimmy/django_projects_windows/pmproject/frontend/src/services/api.ts)"
     ]
   }
 }

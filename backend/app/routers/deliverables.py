@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.acl.resolver import require_permission
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.deliverable import Deliverable
@@ -28,7 +29,7 @@ async def list_deliverables(
     return result.scalars().all()
 
 
-@router.post("/", response_model=DeliverableRead, status_code=201)
+@router.post("/", response_model=DeliverableRead, status_code=201, dependencies=[Depends(require_permission("projects.deliverable.manage"))])
 async def create_deliverable(payload: DeliverableCreate, db: AsyncSession = Depends(get_db)):
     deliverable = Deliverable(**payload.model_dump())
     db.add(deliverable)
@@ -46,7 +47,7 @@ async def get_deliverable(deliverable_id: UUID, db: AsyncSession = Depends(get_d
     return deliverable
 
 
-@router.patch("/{deliverable_id}", response_model=DeliverableRead)
+@router.patch("/{deliverable_id}", response_model=DeliverableRead, dependencies=[Depends(require_permission("projects.deliverable.manage"))])
 async def update_deliverable(deliverable_id: UUID, payload: DeliverableUpdate, db: AsyncSession = Depends(get_db)):
     deliverable = await db.get(Deliverable, deliverable_id)
     if not deliverable:
@@ -59,7 +60,7 @@ async def update_deliverable(deliverable_id: UUID, payload: DeliverableUpdate, d
     return deliverable
 
 
-@router.delete("/{deliverable_id}", status_code=204)
+@router.delete("/{deliverable_id}", status_code=204, dependencies=[Depends(require_permission("projects.deliverable.manage"))])
 async def delete_deliverable(deliverable_id: UUID, db: AsyncSession = Depends(get_db)):
     deliverable = await db.get(Deliverable, deliverable_id)
     if not deliverable:

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.acl.resolver import require_permission
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.change_request import ChangeRequest
@@ -29,7 +30,7 @@ async def list_change_requests(
     return result.scalars().all()
 
 
-@router.post("/", response_model=ChangeRequestRead, status_code=201)
+@router.post("/", response_model=ChangeRequestRead, status_code=201, dependencies=[Depends(require_permission("projects.change.manage"))])
 async def create_change_request(payload: ChangeRequestCreate, db: AsyncSession = Depends(get_db)):
     cr = ChangeRequest(**payload.model_dump())
     db.add(cr)
@@ -47,7 +48,7 @@ async def get_change_request(cr_id: UUID, db: AsyncSession = Depends(get_db)):
     return cr
 
 
-@router.patch("/{cr_id}", response_model=ChangeRequestRead)
+@router.patch("/{cr_id}", response_model=ChangeRequestRead, dependencies=[Depends(require_permission("projects.change.manage"))])
 async def update_change_request(cr_id: UUID, payload: ChangeRequestUpdate, db: AsyncSession = Depends(get_db)):
     cr = await db.get(ChangeRequest, cr_id)
     if not cr:
@@ -60,7 +61,7 @@ async def update_change_request(cr_id: UUID, payload: ChangeRequestUpdate, db: A
     return cr
 
 
-@router.delete("/{cr_id}", status_code=204)
+@router.delete("/{cr_id}", status_code=204, dependencies=[Depends(require_permission("projects.change.manage"))])
 async def delete_change_request(cr_id: UUID, db: AsyncSession = Depends(get_db)):
     cr = await db.get(ChangeRequest, cr_id)
     if not cr:

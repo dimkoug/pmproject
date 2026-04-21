@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.acl.resolver import require_permission
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.crm import (
@@ -34,12 +35,12 @@ async def list_companies(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Company).order_by(Company.name).limit(200))
     return [{"id": str(c.id), "name": c.name, "industry": c.industry, "website": c.website, "phone": c.phone, "annual_revenue": c.annual_revenue, "employee_count": c.employee_count} for c in result.scalars().all()]
 
-@router.post("/companies", status_code=201)
+@router.post("/companies", status_code=201, dependencies=[Depends(require_permission("sales.company.manage"))])
 async def create_company(p: CompanyCreate, db: AsyncSession = Depends(get_db)):
     c = Company(**p.model_dump()); db.add(c); await db.commit(); await db.refresh(c)
     return {"id": str(c.id), "name": c.name}
 
-@router.delete("/companies/{company_id}", status_code=204)
+@router.delete("/companies/{company_id}", status_code=204, dependencies=[Depends(require_permission("sales.company.manage"))])
 async def delete_company(company_id: UUID, db: AsyncSession = Depends(get_db)):
     c = await db.get(Company, company_id)
     if not c: raise HTTPException(404, "Company not found")
@@ -58,12 +59,12 @@ async def list_contacts(company_id: UUID | None = None, db: AsyncSession = Depen
     result = await db.execute(q)
     return [{"id": str(c.id), "first_name": c.first_name, "last_name": c.last_name, "email": c.email, "phone": c.phone, "job_title": c.job_title, "company_id": str(c.company_id) if c.company_id else None} for c in result.scalars().all()]
 
-@router.post("/contacts", status_code=201)
+@router.post("/contacts", status_code=201, dependencies=[Depends(require_permission("sales.contact.manage"))])
 async def create_contact(p: ContactCreate, db: AsyncSession = Depends(get_db)):
     c = Contact(**p.model_dump()); db.add(c); await db.commit(); await db.refresh(c)
     return {"id": str(c.id), "first_name": c.first_name}
 
-@router.delete("/contacts/{contact_id}", status_code=204)
+@router.delete("/contacts/{contact_id}", status_code=204, dependencies=[Depends(require_permission("sales.contact.manage"))])
 async def delete_contact(contact_id: UUID, db: AsyncSession = Depends(get_db)):
     c = await db.get(Contact, contact_id)
     if not c: raise HTTPException(404, "Contact not found")
@@ -82,12 +83,12 @@ async def list_leads(status: str | None = None, db: AsyncSession = Depends(get_d
     result = await db.execute(q)
     return [{"id": str(l.id), "contact_name": l.contact_name, "company_name": l.company_name, "email": l.email, "source": l.source.value, "status": l.status.value, "estimated_value": l.estimated_value} for l in result.scalars().all()]
 
-@router.post("/leads", status_code=201)
+@router.post("/leads", status_code=201, dependencies=[Depends(require_permission("sales.lead.create"))])
 async def create_lead(p: LeadCreate, db: AsyncSession = Depends(get_db)):
     l = Lead(**p.model_dump()); db.add(l); await db.commit(); await db.refresh(l)
     return {"id": str(l.id), "contact_name": l.contact_name}
 
-@router.patch("/leads/{lead_id}")
+@router.patch("/leads/{lead_id}", dependencies=[Depends(require_permission("sales.lead.update_status"))])
 async def update_lead_status(lead_id: UUID, status: str = Query(...), db: AsyncSession = Depends(get_db)):
     l = await db.get(Lead, lead_id)
     if not l: raise HTTPException(404, "Lead not found")
@@ -107,14 +108,14 @@ async def list_opportunities(stage: str | None = None, db: AsyncSession = Depend
     result = await db.execute(q)
     return [{"id": str(o.id), "title": o.title, "stage": o.stage.value, "amount": o.amount, "probability": o.probability, "expected_close": o.expected_close.isoformat()[:10] if o.expected_close else None, "company_id": str(o.company_id) if o.company_id else None} for o in result.scalars().all()]
 
-@router.post("/opportunities", status_code=201)
+@router.post("/opportunities", status_code=201, dependencies=[Depends(require_permission("sales.opportunity.manage"))])
 async def create_opportunity(p: OpportunityCreate, db: AsyncSession = Depends(get_db)):
     from datetime import datetime
     o = Opportunity(**{**p.model_dump(exclude={"expected_close"}), "expected_close": datetime.fromisoformat(p.expected_close) if p.expected_close else None})
     db.add(o); await db.commit(); await db.refresh(o)
     return {"id": str(o.id), "title": o.title}
 
-@router.patch("/opportunities/{opp_id}")
+@router.patch("/opportunities/{opp_id}", dependencies=[Depends(require_permission("sales.opportunity.manage"))])
 async def update_opportunity_stage(opp_id: UUID, stage: str = Query(...), db: AsyncSession = Depends(get_db)):
     o = await db.get(Opportunity, opp_id)
     if not o: raise HTTPException(404, "Opportunity not found")
@@ -274,7 +275,7 @@ async def list_quotes(opportunity_id: UUID | None = None, db: AsyncSession = Dep
     result = await db.execute(q)
     return [{"id": str(qt.id), "quote_number": qt.quote_number, "status": qt.status.value, "total": qt.total, "valid_until": qt.valid_until.isoformat()[:10] if qt.valid_until else None, "company_id": str(qt.company_id) if qt.company_id else None, "opportunity_id": str(qt.opportunity_id) if qt.opportunity_id else None, "invoice_id": str(qt.invoice_id) if qt.invoice_id else None} for qt in result.scalars().all()]
 
-@router.post("/quotes", status_code=201)
+@router.post("/quotes", status_code=201, dependencies=[Depends(require_permission("sales.quote.manage"))])
 async def create_quote(p: QuoteCreate, db: AsyncSession = Depends(get_db)):
     subtotal = sum((i.quantity or 1) * (i.unit_price or 0) for i in p.items)
     tax = subtotal * p.tax_rate / 100
@@ -289,14 +290,14 @@ async def create_quote(p: QuoteCreate, db: AsyncSession = Depends(get_db)):
     await db.commit(); await db.refresh(q)
     return {"id": str(q.id), "quote_number": q.quote_number, "total": q.total}
 
-@router.patch("/quotes/{quote_id}")
+@router.patch("/quotes/{quote_id}", dependencies=[Depends(require_permission("sales.quote.manage"))])
 async def update_quote_status(quote_id: UUID, status: str = Query(...), db: AsyncSession = Depends(get_db)):
     q = await db.get(Quote, quote_id)
     if not q: raise HTTPException(404, "Quote not found")
     q.status = QuoteStatus(status); await db.commit()
     return {"id": str(q.id), "status": q.status.value}
 
-@router.post("/quotes/{quote_id}/convert")
+@router.post("/quotes/{quote_id}/convert", dependencies=[Depends(require_permission("sales.quote.manage"))])
 async def convert_quote_to_invoice(quote_id: UUID, db: AsyncSession = Depends(get_db)):
     q = await db.get(Quote, quote_id)
     if not q: raise HTTPException(404, "Quote not found")
@@ -330,7 +331,7 @@ async def list_campaigns(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Campaign).order_by(Campaign.created_at.desc()).limit(100))
     return [{"id": str(c.id), "name": c.name, "status": c.status.value, "budget": c.budget, "actual_cost": c.actual_cost, "start_date": c.start_date.isoformat()[:10] if c.start_date else None, "end_date": c.end_date.isoformat()[:10] if c.end_date else None} for c in result.scalars().all()]
 
-@router.post("/campaigns", status_code=201)
+@router.post("/campaigns", status_code=201, dependencies=[Depends(require_permission("sales.campaign.manage"))])
 async def create_campaign(p: CampaignCreate, db: AsyncSession = Depends(get_db)):
     c = Campaign(name=p.name, status=p.status, budget=p.budget, actual_cost=p.actual_cost, description=p.description,
                  start_date=datetime.fromisoformat(p.start_date) if p.start_date else None,
@@ -422,7 +423,7 @@ async def list_contracts(company_id: UUID | None = None, db: AsyncSession = Depe
              "auto_renew": c.auto_renew, "company_id": str(c.company_id)}
             for c in result.scalars().all()]
 
-@router.post("/contracts", status_code=201)
+@router.post("/contracts", status_code=201, dependencies=[Depends(require_permission("sales.contract.manage"))])
 async def create_contract(p: ContractCreate, db: AsyncSession = Depends(get_db)):
     c = Contract(company_id=p.company_id, opportunity_id=p.opportunity_id, contract_number=p.contract_number,
                  status=p.status, billing_cycle=p.billing_cycle, amount=p.amount,
@@ -449,7 +450,7 @@ async def contract_metrics(db: AsyncSession = Depends(get_db)):
                                    "amount": c.amount, "auto_renew": c.auto_renew} for c in renewals_30],
             "churned_total": churned}
 
-@router.patch("/contracts/{contract_id}")
+@router.patch("/contracts/{contract_id}", dependencies=[Depends(require_permission("sales.contract.manage"))])
 async def update_contract_status(contract_id: UUID, status: str = Query(...), db: AsyncSession = Depends(get_db)):
     c = await db.get(Contract, contract_id)
     if not c: raise HTTPException(404, "Not found")
@@ -470,13 +471,13 @@ async def list_commission_rules(db: AsyncSession = Depends(get_db)):
              "percentage": r.percentage, "min_amount": r.min_amount, "max_amount": r.max_amount, "is_active": r.is_active}
             for r in result.scalars().all()]
 
-@router.post("/commission-rules", status_code=201)
+@router.post("/commission-rules", status_code=201, dependencies=[Depends(require_permission("sales.commission.manage"))])
 async def create_commission_rule(p: CommissionRuleCreate, db: AsyncSession = Depends(get_db)):
     r = CommissionRule(**p.model_dump())
     db.add(r); await db.commit(); await db.refresh(r)
     return {"id": str(r.id)}
 
-@router.post("/commissions/compute")
+@router.post("/commissions/compute", dependencies=[Depends(require_permission("sales.commission.manage"))])
 async def compute_commissions(db: AsyncSession = Depends(get_db)):
     """For each closed-won opportunity without a commission, apply the best matching rule."""
     rules = (await db.execute(select(CommissionRule).where(CommissionRule.is_active == True))).scalars().all()
@@ -509,7 +510,7 @@ async def list_commissions(user_id: UUID | None = None, db: AsyncSession = Depen
              "created_at": c.created_at.isoformat() if c.created_at else None}
             for c in result.scalars().all()]
 
-@router.post("/commissions/{commission_id}/pay")
+@router.post("/commissions/{commission_id}/pay", dependencies=[Depends(require_permission("sales.commission.manage"))])
 async def pay_commission(commission_id: UUID, db: AsyncSession = Depends(get_db)):
     c = await db.get(Commission, commission_id)
     if not c: raise HTTPException(404, "Not found")
@@ -530,7 +531,7 @@ async def list_territories(db: AsyncSession = Depends(get_db)):
              "rule_min_revenue": t.rule_min_revenue, "owner_id": str(t.owner_id) if t.owner_id else None}
             for t in result.scalars().all()]
 
-@router.post("/territories", status_code=201)
+@router.post("/territories", status_code=201, dependencies=[Depends(require_permission("sales.territory.manage"))])
 async def create_territory(p: TerritoryCreate, db: AsyncSession = Depends(get_db)):
     t = Territory(**p.model_dump())
     db.add(t); await db.commit(); await db.refresh(t)

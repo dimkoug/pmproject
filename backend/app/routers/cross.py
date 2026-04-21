@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.acl.resolver import require_permission
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.cross import (
@@ -119,7 +120,7 @@ async def _apply_decision_side_effects(a: ApprovalRequest, db: AsyncSession):
         d = await db.get(Document, a.target_id)
         if d: d.status = DocumentStatus.APPROVED
 
-@router.post("/approvals/{approval_id}/decide")
+@router.post("/approvals/{approval_id}/decide", dependencies=[Depends(require_permission("admin.approval.decide"))])
 async def decide_approval(approval_id: UUID, p: ApprovalDecision, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     a = await db.get(ApprovalRequest, approval_id)
     if not a: raise HTTPException(404, "Approval not found")
@@ -143,13 +144,13 @@ async def list_webhooks(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Webhook).order_by(Webhook.created_at.desc()))
     return [{"id": str(w.id), "name": w.name, "url": w.url, "events": w.events, "is_active": w.is_active} for w in result.scalars().all()]
 
-@router.post("/webhooks", status_code=201)
+@router.post("/webhooks", status_code=201, dependencies=[Depends(require_permission("admin.webhook.manage"))])
 async def create_webhook(p: WebhookCreate, db: AsyncSession = Depends(get_db)):
     w = Webhook(name=p.name, url=p.url, events=p.events, secret=p.secret or secrets.token_urlsafe(24))
     db.add(w); await db.commit(); await db.refresh(w)
     return {"id": str(w.id), "secret": w.secret}
 
-@router.delete("/webhooks/{hook_id}", status_code=204)
+@router.delete("/webhooks/{hook_id}", status_code=204, dependencies=[Depends(require_permission("admin.webhook.manage"))])
 async def delete_webhook(hook_id: UUID, db: AsyncSession = Depends(get_db)):
     w = await db.get(Webhook, hook_id)
     if not w: raise HTTPException(404, "Not found")
@@ -158,7 +159,7 @@ async def delete_webhook(hook_id: UUID, db: AsyncSession = Depends(get_db)):
 class WebhookTest(BaseModel):
     event: str = "test.ping"; payload: dict = {}
 
-@router.post("/webhooks/{hook_id}/test")
+@router.post("/webhooks/{hook_id}/test", dependencies=[Depends(require_permission("admin.webhook.manage"))])
 async def test_webhook(hook_id: UUID, p: WebhookTest, background: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     w = await db.get(Webhook, hook_id)
     if not w: raise HTTPException(404, "Not found")
@@ -207,7 +208,7 @@ async def list_api_keys(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ApiKey).order_by(ApiKey.created_at.desc()))
     return [{"id": str(k.id), "name": k.name, "prefix": k.prefix, "is_active": k.is_active, "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None} for k in result.scalars().all()]
 
-@router.post("/api-keys", status_code=201)
+@router.post("/api-keys", status_code=201, dependencies=[Depends(require_permission("admin.apikey.manage"))])
 async def create_api_key(p: ApiKeyCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     raw = secrets.token_urlsafe(32)
     prefix = raw[:8]
@@ -216,7 +217,7 @@ async def create_api_key(p: ApiKeyCreate, current_user: User = Depends(get_curre
     db.add(k); await db.commit(); await db.refresh(k)
     return {"id": str(k.id), "api_key": f"{prefix}.{raw}", "warning": "Save this now — it will not be shown again"}
 
-@router.delete("/api-keys/{key_id}", status_code=204)
+@router.delete("/api-keys/{key_id}", status_code=204, dependencies=[Depends(require_permission("admin.apikey.manage"))])
 async def revoke_api_key(key_id: UUID, db: AsyncSession = Depends(get_db)):
     k = await db.get(ApiKey, key_id)
     if not k: raise HTTPException(404, "Not found")
@@ -274,14 +275,14 @@ async def list_schedules(db: AsyncSession = Depends(get_db)):
              "last_run": r.last_run.isoformat() if r.last_run else None, "is_active": r.is_active}
             for r in result.scalars().all()]
 
-@router.post("/scheduled-reports", status_code=201)
+@router.post("/scheduled-reports", status_code=201, dependencies=[Depends(require_permission("admin.workspace.manage"))])
 async def create_schedule(p: ScheduledReportCreate, db: AsyncSession = Depends(get_db)):
     r = ScheduledReport(name=p.name, endpoint=p.endpoint, frequency=p.frequency, recipients=p.recipients,
                         next_run=_next_run(p.frequency, datetime.utcnow()))
     db.add(r); await db.commit(); await db.refresh(r)
     return {"id": str(r.id)}
 
-@router.post("/scheduled-reports/run")
+@router.post("/scheduled-reports/run", dependencies=[Depends(require_permission("admin.workspace.manage"))])
 async def run_due_reports(db: AsyncSession = Depends(get_db)):
     """Run all reports whose next_run <= now. Stores result in runs table, updates next_run."""
     now = datetime.utcnow()
@@ -381,7 +382,7 @@ async def list_sso(db: AsyncSession = Depends(get_db)):
              "issuer_url": p.issuer_url, "is_active": p.is_active}
             for p in result.scalars().all()]
 
-@router.post("/sso/providers", status_code=201)
+@router.post("/sso/providers", status_code=201, dependencies=[Depends(require_permission("admin.sso.manage"))])
 async def create_sso(p: SsoProviderCreate, db: AsyncSession = Depends(get_db)):
     masked = f"****{p.client_secret[-4:]}" if p.client_secret and len(p.client_secret) >= 4 else None
     prov = SsoProvider(name=p.name, provider_type=p.provider_type, issuer_url=p.issuer_url,
@@ -427,7 +428,7 @@ async def list_workspaces(current_user: User = Depends(get_current_user), db: As
              "owner_id": str(w.owner_id) if w.owner_id else None}
             for w in result.scalars().all()]
 
-@router.post("/workspaces", status_code=201)
+@router.post("/workspaces", status_code=201, dependencies=[Depends(require_permission("admin.workspace.manage"))])
 async def create_workspace(p: WorkspaceCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     existing = (await db.execute(select(Workspace).where(Workspace.slug == p.slug))).scalar_one_or_none()
     if existing: raise HTTPException(400, "Slug already exists")
@@ -437,7 +438,7 @@ async def create_workspace(p: WorkspaceCreate, current_user: User = Depends(get_
     await db.commit(); await db.refresh(w)
     return {"id": str(w.id), "slug": w.slug}
 
-@router.post("/workspaces/{ws_id}/members", status_code=201)
+@router.post("/workspaces/{ws_id}/members", status_code=201, dependencies=[Depends(require_permission("admin.workspace.manage"))])
 async def add_workspace_member(ws_id: UUID, p: WorkspaceMemberAdd, db: AsyncSession = Depends(get_db)):
     m = WorkspaceMember(workspace_id=ws_id, user_id=p.user_id, role=p.role)
     db.add(m); await db.commit(); await db.refresh(m)

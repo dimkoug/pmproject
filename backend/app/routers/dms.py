@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.acl.resolver import require_permission
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.dms import (
@@ -73,13 +74,13 @@ async def list_folders(project_id: UUID | None = None, parent_id: UUID | None = 
         folders.append({"id": str(f.id), "name": f.name, "description": f.description, "parent_id": str(f.parent_id) if f.parent_id else None, "doc_count": doc_count, "subfolder_count": sub_count, "created_at": f.created_at.isoformat()})
     return folders
 
-@router.post("/folders", status_code=201)
+@router.post("/folders", status_code=201, dependencies=[Depends(require_permission("documents.folder.manage"))])
 async def create_folder(p: FolderCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     f = Folder(project_id=p.project_id, parent_id=p.parent_id, name=p.name, description=p.description, created_by_id=current_user.id)
     db.add(f); await db.commit(); await db.refresh(f)
     return {"id": str(f.id), "name": f.name}
 
-@router.delete("/folders/{folder_id}", status_code=204)
+@router.delete("/folders/{folder_id}", status_code=204, dependencies=[Depends(require_permission("documents.folder.manage"))])
 async def delete_folder(folder_id: UUID, db: AsyncSession = Depends(get_db)):
     f = await db.get(Folder, folder_id)
     if not f: raise HTTPException(404, "Folder not found")
@@ -105,7 +106,7 @@ async def list_documents(
         for d in result.scalars().all()
     ]
 
-@router.post("/documents", status_code=201)
+@router.post("/documents", status_code=201, dependencies=[Depends(require_permission("documents.file.upload"))])
 async def create_document(
     file: UploadFile = File(...),
     title: str = Form(...),
@@ -143,7 +144,7 @@ async def create_document(
     db.add(ver); await db.commit(); await db.refresh(doc)
     return {"id": str(doc.id), "title": doc.title, "version": 1}
 
-@router.post("/documents/{doc_id}/versions", status_code=201)
+@router.post("/documents/{doc_id}/versions", status_code=201, dependencies=[Depends(require_permission("documents.file.upload"))])
 async def upload_new_version(
     doc_id: UUID,
     file: UploadFile = File(...),
@@ -212,7 +213,7 @@ async def update_document(doc_id: UUID, title: str | None = None, status: str | 
     await db.commit()
     return {"id": str(doc.id), "title": doc.title, "status": doc.status.value}
 
-@router.delete("/documents/{doc_id}", status_code=204)
+@router.delete("/documents/{doc_id}", status_code=204, dependencies=[Depends(require_permission("documents.file.delete"))])
 async def delete_document(doc_id: UUID, db: AsyncSession = Depends(get_db)):
     doc = await db.get(Document, doc_id)
     if not doc: raise HTTPException(404, "Document not found")
@@ -284,7 +285,7 @@ async def list_signatures(document_id: UUID | None = None, db: AsyncSession = De
     result = await db.execute(q)
     return [{"id": str(s.id), "document_id": str(s.document_id), "signer_email": s.signer_email, "signer_name": s.signer_name, "status": s.status.value, "signed_at": s.signed_at.isoformat() if s.signed_at else None, "token": s.token} for s in result.scalars().all()]
 
-@router.post("/signatures", status_code=201)
+@router.post("/signatures", status_code=201, dependencies=[Depends(require_permission("documents.signature.manage"))])
 async def request_signature(p: SignatureRequestCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     sig = SignatureRequest(document_id=p.document_id, signer_email=p.signer_email, signer_name=p.signer_name,
                            message=p.message, token=secrets.token_urlsafe(32), requested_by_id=current_user.id)
@@ -394,13 +395,13 @@ async def list_policies(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(RetentionPolicy).order_by(RetentionPolicy.name))
     return [{"id": str(r.id), "name": r.name, "folder_id": str(r.folder_id) if r.folder_id else None, "tag_match": r.tag_match, "days_after": r.days_after, "action": r.action.value, "is_active": r.is_active} for r in result.scalars().all()]
 
-@router.post("/retention-policies", status_code=201)
+@router.post("/retention-policies", status_code=201, dependencies=[Depends(require_permission("documents.retention.manage"))])
 async def create_policy(p: RetentionPolicyCreate, db: AsyncSession = Depends(get_db)):
     r = RetentionPolicy(**p.model_dump())
     db.add(r); await db.commit(); await db.refresh(r)
     return {"id": str(r.id)}
 
-@router.post("/retention-policies/apply")
+@router.post("/retention-policies/apply", dependencies=[Depends(require_permission("documents.retention.manage"))])
 async def apply_retention(db: AsyncSession = Depends(get_db)):
     policies = (await db.execute(select(RetentionPolicy).where(RetentionPolicy.is_active == True))).scalars().all()
     archived = deleted = 0
@@ -551,7 +552,7 @@ async def list_workflows(document_id: UUID | None = None, db: AsyncSession = Dep
                                "status": s.status.value, "note": s.note} for s in steps]})
     return out
 
-@router.post("/workflows", status_code=201)
+@router.post("/workflows", status_code=201, dependencies=[Depends(require_permission("documents.workflow.manage"))])
 async def create_workflow(p: WorkflowCreate, db: AsyncSession = Depends(get_db)):
     if not p.steps: raise HTTPException(400, "At least one step required")
     w = DocumentWorkflow(document_id=p.document_id, name=p.name)
@@ -565,7 +566,7 @@ class WorkflowAdvance(BaseModel):
     decision: str  # approved | rejected
     note: str | None = None
 
-@router.post("/workflows/{wf_id}/advance")
+@router.post("/workflows/{wf_id}/advance", dependencies=[Depends(require_permission("documents.workflow.manage"))])
 async def advance_workflow(wf_id: UUID, p: WorkflowAdvance, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     w = await db.get(DocumentWorkflow, wf_id)
     if not w or w.is_complete: raise HTTPException(400, "Workflow not active")

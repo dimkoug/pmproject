@@ -656,6 +656,69 @@ export const apiSlice = createApi({
     createSsoProvider: builder.mutation<any, any>({ query: (b) => ({ url: "/sso/providers", method: "POST", body: b }) }),
     getWorkspaces: builder.query<any[], void>({ query: () => "/workspaces" }),
     createWorkspace: builder.mutation<any, any>({ query: (b) => ({ url: "/workspaces", method: "POST", body: b }) }),
+
+    // ── ACL ─────────────────────────────────────────────────────
+    getMyPermissions: builder.query<{ role: string; granted: string[]; denied: string[] }, void>({
+      query: () => "/me/permissions",
+    }),
+    getAclPermissions: builder.query<any[], void>({ query: () => "/admin/acl/permissions" }),
+    getAclGroups: builder.query<any[], void>({ query: () => "/admin/acl/groups" }),
+    createAclGroup: builder.mutation<any, { name: string; description?: string }>({
+      query: (b) => ({ url: "/admin/acl/groups", method: "POST", body: b }),
+    }),
+    deleteAclGroup: builder.mutation<void, string>({
+      query: (id) => ({ url: `/admin/acl/groups/${id}`, method: "DELETE" }),
+    }),
+    getGroupPermissions: builder.query<string[], string>({
+      query: (groupId) => `/admin/acl/groups/${groupId}/permissions`,
+    }),
+    setGroupPermissions: builder.mutation<string[], { groupId: string; codenames: string[] }>({
+      query: ({ groupId, codenames }) => ({
+        url: `/admin/acl/groups/${groupId}/permissions`, method: "PUT", body: { codenames },
+      }),
+    }),
+    getAdminUsers: builder.query<any[], void>({ query: () => "/admin/users" }),
+    getUserAclGroups: builder.query<any[], string>({
+      query: (userId) => `/admin/acl/users/${userId}/groups`,
+    }),
+    setUserAclGroups: builder.mutation<any, { userId: string; group_ids: string[] }>({
+      query: ({ userId, group_ids }) => ({
+        url: `/admin/acl/users/${userId}/groups`, method: "PUT", body: { group_ids },
+      }),
+    }),
+    getUserDirectPermissions: builder.query<any[], string>({
+      query: (userId) => `/admin/acl/users/${userId}/permissions`,
+    }),
+    upsertUserPermission: builder.mutation<any, { userId: string; codename: string; is_deny: boolean; reason?: string }>({
+      query: ({ userId, ...body }) => ({
+        url: `/admin/acl/users/${userId}/permissions`, method: "POST", body,
+      }),
+    }),
+    deleteUserPermission: builder.mutation<void, { userId: string; codename: string }>({
+      query: ({ userId, codename }) => ({
+        url: `/admin/acl/users/${userId}/permissions/${encodeURIComponent(codename)}`, method: "DELETE",
+      }),
+    }),
+    inspectPermission: builder.query<any, { userId: string; codename: string; projectId?: string }>({
+      query: ({ userId, codename, projectId }) => {
+        const p = new URLSearchParams({ user_id: userId, codename });
+        if (projectId) p.set("project_id", projectId);
+        return `/admin/acl/inspect?${p}`;
+      },
+    }),
+    getProjectMembers: builder.query<any[], string>({
+      query: (projectId) => `/projects/${projectId}/members`,
+    }),
+    addProjectMember: builder.mutation<any, { projectId: string; user_id: string; role?: string }>({
+      query: ({ projectId, ...body }) => ({
+        url: `/projects/${projectId}/members`, method: "POST", body,
+      }),
+    }),
+    removeProjectMember: builder.mutation<void, { projectId: string; userId: string }>({
+      query: ({ projectId, userId }) => ({
+        url: `/projects/${projectId}/members/${userId}`, method: "DELETE",
+      }),
+    }),
   }),
 });
 
@@ -914,4 +977,22 @@ export const {
   useCreateSsoProviderMutation,
   useGetWorkspacesQuery,
   useCreateWorkspaceMutation,
+  // ACL
+  useGetMyPermissionsQuery,
+  useGetAclPermissionsQuery,
+  useGetAclGroupsQuery,
+  useCreateAclGroupMutation,
+  useDeleteAclGroupMutation,
+  useGetGroupPermissionsQuery,
+  useSetGroupPermissionsMutation,
+  useGetAdminUsersQuery,
+  useGetUserAclGroupsQuery,
+  useSetUserAclGroupsMutation,
+  useGetUserDirectPermissionsQuery,
+  useUpsertUserPermissionMutation,
+  useDeleteUserPermissionMutation,
+  useInspectPermissionQuery,
+  useGetProjectMembersQuery,
+  useAddProjectMemberMutation,
+  useRemoveProjectMemberMutation,
 } = apiSlice;

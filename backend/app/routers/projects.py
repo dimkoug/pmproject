@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.acl.resolver import require_permission
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.project import Project
@@ -25,7 +26,7 @@ async def list_projects(
     return result.scalars().all()
 
 
-@router.post("/", response_model=ProjectRead, status_code=201)
+@router.post("/", response_model=ProjectRead, status_code=201, dependencies=[Depends(require_permission("projects.project.create"))])
 async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_db)):
     project = Project(**payload.model_dump())
     db.add(project)
@@ -43,7 +44,7 @@ async def get_project(project_id: UUID, db: AsyncSession = Depends(get_db)):
     return project
 
 
-@router.patch("/{project_id}", response_model=ProjectRead)
+@router.patch("/{project_id}", response_model=ProjectRead, dependencies=[Depends(require_permission("projects.project.update"))])
 async def update_project(project_id: UUID, payload: ProjectUpdate, db: AsyncSession = Depends(get_db)):
     project = await db.get(Project, project_id)
     if not project:
@@ -56,7 +57,7 @@ async def update_project(project_id: UUID, payload: ProjectUpdate, db: AsyncSess
     return project
 
 
-@router.delete("/{project_id}", status_code=204)
+@router.delete("/{project_id}", status_code=204, dependencies=[Depends(require_permission("projects.project.delete"))])
 async def delete_project(project_id: UUID, db: AsyncSession = Depends(get_db)):
     project = await db.get(Project, project_id)
     if not project:

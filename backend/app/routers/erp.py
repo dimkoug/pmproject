@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import Float, String, and_, case, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.acl.resolver import require_permission
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.erp import (
@@ -33,7 +34,7 @@ async def list_accounts(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Account).order_by(Account.code))
     return [{"id": str(a.id), "code": a.code, "name": a.name, "account_type": a.account_type.value, "balance": a.balance, "is_active": a.is_active} for a in result.scalars().all()]
 
-@router.post("/accounts", status_code=201)
+@router.post("/accounts", status_code=201, dependencies=[Depends(require_permission("finance.account.manage"))])
 async def create_account(p: AccountCreate, db: AsyncSession = Depends(get_db)):
     a = Account(code=p.code, name=p.name, account_type=p.account_type, description=p.description)
     db.add(a); await db.commit(); await db.refresh(a)
@@ -49,12 +50,12 @@ async def list_vendors(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Vendor).order_by(Vendor.name))
     return [{"id": str(v.id), "name": v.name, "contact_person": v.contact_person, "email": v.email, "phone": v.phone, "is_active": v.is_active} for v in result.scalars().all()]
 
-@router.post("/vendors", status_code=201)
+@router.post("/vendors", status_code=201, dependencies=[Depends(require_permission("finance.vendor.manage"))])
 async def create_vendor(p: VendorCreate, db: AsyncSession = Depends(get_db)):
     v = Vendor(**p.model_dump()); db.add(v); await db.commit(); await db.refresh(v)
     return {"id": str(v.id), "name": v.name}
 
-@router.delete("/vendors/{vendor_id}", status_code=204)
+@router.delete("/vendors/{vendor_id}", status_code=204, dependencies=[Depends(require_permission("finance.vendor.manage"))])
 async def delete_vendor(vendor_id: UUID, db: AsyncSession = Depends(get_db)):
     v = await db.get(Vendor, vendor_id)
     if not v: raise HTTPException(404, "Vendor not found")
@@ -75,7 +76,7 @@ async def list_invoices(project_id: UUID | None = None, db: AsyncSession = Depen
     result = await db.execute(q.limit(100))
     return [{"id": str(i.id), "invoice_number": i.invoice_number, "invoice_type": i.invoice_type.value, "status": i.status.value, "total": i.total, "issue_date": i.issue_date.isoformat()[:10] if i.issue_date else None, "due_date": i.due_date.isoformat()[:10] if i.due_date else None} for i in result.scalars().all()]
 
-@router.post("/invoices", status_code=201)
+@router.post("/invoices", status_code=201, dependencies=[Depends(require_permission("finance.invoice.create"))])
 async def create_invoice(p: InvoiceCreate, db: AsyncSession = Depends(get_db)):
     from datetime import datetime
     tax_amount = p.subtotal * p.tax_rate / 100
@@ -87,7 +88,7 @@ async def create_invoice(p: InvoiceCreate, db: AsyncSession = Depends(get_db)):
     await db.commit(); await db.refresh(inv)
     return {"id": str(inv.id), "invoice_number": inv.invoice_number, "total": inv.total}
 
-@router.patch("/invoices/{invoice_id}")
+@router.patch("/invoices/{invoice_id}", dependencies=[Depends(require_permission("finance.invoice.update_status"))])
 async def update_invoice_status(invoice_id: UUID, status: str = Query(...), db: AsyncSession = Depends(get_db)):
     inv = await db.get(Invoice, invoice_id)
     if not inv: raise HTTPException(404, "Invoice not found")
@@ -106,14 +107,14 @@ async def list_expenses(project_id: UUID | None = None, db: AsyncSession = Depen
     result = await db.execute(q.limit(200))
     return [{"id": str(e.id), "description": e.description, "category": e.category.value, "amount": e.amount, "expense_date": e.expense_date.isoformat()[:10] if e.expense_date else None, "is_approved": e.is_approved} for e in result.scalars().all()]
 
-@router.post("/expenses", status_code=201)
+@router.post("/expenses", status_code=201, dependencies=[Depends(require_permission("finance.expense.manage"))])
 async def create_expense(p: ExpenseCreate, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     from datetime import datetime
     e = Expense(project_id=p.project_id, user_id=current_user.id, vendor_id=p.vendor_id, description=p.description, category=p.category, amount=p.amount, expense_date=datetime.fromisoformat(p.expense_date) if p.expense_date else datetime.utcnow(), receipt_ref=p.receipt_ref)
     db.add(e); await db.commit(); await db.refresh(e)
     return {"id": str(e.id), "amount": e.amount}
 
-@router.patch("/expenses/{expense_id}/approve")
+@router.patch("/expenses/{expense_id}/approve", dependencies=[Depends(require_permission("finance.expense.manage"))])
 async def approve_expense(expense_id: UUID, db: AsyncSession = Depends(get_db)):
     e = await db.get(Expense, expense_id)
     if not e: raise HTTPException(404, "Expense not found")
@@ -132,13 +133,13 @@ async def list_pos(project_id: UUID | None = None, db: AsyncSession = Depends(ge
     result = await db.execute(q.limit(100))
     return [{"id": str(po.id), "po_number": po.po_number, "status": po.status.value, "total_amount": po.total_amount, "description": po.description} for po in result.scalars().all()]
 
-@router.post("/purchase-orders", status_code=201)
+@router.post("/purchase-orders", status_code=201, dependencies=[Depends(require_permission("finance.po.manage"))])
 async def create_po(p: POCreate, db: AsyncSession = Depends(get_db)):
     po = PurchaseOrder(project_id=p.project_id, vendor_id=p.vendor_id, po_number=p.po_number, description=p.description, total_amount=p.total_amount)
     db.add(po); await db.commit(); await db.refresh(po)
     return {"id": str(po.id), "po_number": po.po_number}
 
-@router.patch("/purchase-orders/{po_id}")
+@router.patch("/purchase-orders/{po_id}", dependencies=[Depends(require_permission("finance.po.manage"))])
 async def update_po_status(po_id: UUID, status: str = Query(...), db: AsyncSession = Depends(get_db)):
     po = await db.get(PurchaseOrder, po_id)
     if not po: raise HTTPException(404, "PO not found")
@@ -157,12 +158,12 @@ async def list_assets(project_id: UUID | None = None, db: AsyncSession = Depends
     result = await db.execute(q.limit(200))
     return [{"id": str(a.id), "name": a.name, "asset_tag": a.asset_tag, "category": a.category, "status": a.status.value, "purchase_cost": a.purchase_cost, "current_value": a.current_value, "assigned_to": a.assigned_to, "location": a.location} for a in result.scalars().all()]
 
-@router.post("/assets", status_code=201)
+@router.post("/assets", status_code=201, dependencies=[Depends(require_permission("finance.asset.manage"))])
 async def create_asset(p: AssetCreate, db: AsyncSession = Depends(get_db)):
     a = Asset(**p.model_dump()); db.add(a); await db.commit(); await db.refresh(a)
     return {"id": str(a.id), "name": a.name}
 
-@router.delete("/assets/{asset_id}", status_code=204)
+@router.delete("/assets/{asset_id}", status_code=204, dependencies=[Depends(require_permission("finance.asset.manage"))])
 async def delete_asset(asset_id: UUID, db: AsyncSession = Depends(get_db)):
     a = await db.get(Asset, asset_id)
     if not a: raise HTTPException(404, "Asset not found")
@@ -220,7 +221,7 @@ async def list_budgets(project_id: UUID | None = None, db: AsyncSession = Depend
     result = await db.execute(q)
     return [{"id": str(b.id), "name": b.name, "total_amount": b.total_amount, "period_start": b.period_start.isoformat()[:10] if b.period_start else None, "period_end": b.period_end.isoformat()[:10] if b.period_end else None} for b in result.scalars().all()]
 
-@router.post("/budgets", status_code=201)
+@router.post("/budgets", status_code=201, dependencies=[Depends(require_permission("finance.budget.manage"))])
 async def create_budget(p: BudgetCreate, db: AsyncSession = Depends(get_db)):
     b = Budget(project_id=p.project_id, name=p.name, notes=p.notes,
                period_start=datetime.fromisoformat(p.period_start) if p.period_start else None,
@@ -308,7 +309,7 @@ async def list_payments(invoice_id: UUID | None = None, db: AsyncSession = Depen
     result = await db.execute(q)
     return [{"id": str(p.id), "invoice_id": str(p.invoice_id), "amount": p.amount, "method": p.method, "reference": p.reference, "payment_date": p.payment_date.isoformat()[:10] if p.payment_date else None} for p in result.scalars().all()]
 
-@router.post("/payments", status_code=201)
+@router.post("/payments", status_code=201, dependencies=[Depends(require_permission("finance.payment.record"))])
 async def create_payment(p: PaymentCreate, db: AsyncSession = Depends(get_db)):
     inv = await db.get(Invoice, p.invoice_id)
     if not inv: raise HTTPException(404, "Invoice not found")
@@ -430,7 +431,7 @@ async def list_journal(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(JournalEntry).order_by(JournalEntry.entry_date.desc()).limit(100))
     return [{"id": str(j.id), "entry_number": j.entry_number, "entry_date": j.entry_date.isoformat()[:10] if j.entry_date else None, "memo": j.memo, "is_posted": j.is_posted} for j in result.scalars().all()]
 
-@router.post("/journal", status_code=201)
+@router.post("/journal", status_code=201, dependencies=[Depends(require_permission("finance.journal.post"))])
 async def create_journal(p: JournalEntryCreate, db: AsyncSession = Depends(get_db)):
     total_d = sum(l.debit for l in p.lines)
     total_c = sum(l.credit for l in p.lines)
@@ -444,7 +445,7 @@ async def create_journal(p: JournalEntryCreate, db: AsyncSession = Depends(get_d
     await db.commit()
     return {"id": str(je.id), "entry_number": je.entry_number}
 
-@router.post("/journal/{entry_id}/post")
+@router.post("/journal/{entry_id}/post", dependencies=[Depends(require_permission("finance.journal.post"))])
 async def post_journal(entry_id: UUID, db: AsyncSession = Depends(get_db)):
     je = await db.get(JournalEntry, entry_id)
     if not je: raise HTTPException(404, "Entry not found")
@@ -490,7 +491,7 @@ async def list_bank_txns(reconciled: bool | None = None, db: AsyncSession = Depe
     result = await db.execute(q)
     return [{"id": str(t.id), "description": t.description, "amount": t.amount, "reference": t.reference, "txn_date": t.txn_date.isoformat()[:10] if t.txn_date else None, "is_reconciled": t.is_reconciled, "matched_invoice_id": str(t.matched_invoice_id) if t.matched_invoice_id else None} for t in result.scalars().all()]
 
-@router.post("/bank-transactions", status_code=201)
+@router.post("/bank-transactions", status_code=201, dependencies=[Depends(require_permission("finance.bank.manage"))])
 async def create_bank_txn(p: BankTxnCreate, db: AsyncSession = Depends(get_db)):
     t = BankTransaction(account_id=p.account_id, description=p.description, amount=p.amount, reference=p.reference,
                         txn_date=datetime.fromisoformat(p.txn_date) if p.txn_date else datetime.utcnow())
@@ -539,7 +540,7 @@ async def list_warehouses(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Warehouse).order_by(Warehouse.code))
     return [{"id": str(w.id), "code": w.code, "name": w.name, "address": w.address, "is_active": w.is_active} for w in result.scalars().all()]
 
-@router.post("/warehouses", status_code=201)
+@router.post("/warehouses", status_code=201, dependencies=[Depends(require_permission("finance.inventory.manage"))])
 async def create_warehouse(p: WarehouseCreate, db: AsyncSession = Depends(get_db)):
     w = Warehouse(**p.model_dump())
     db.add(w); await db.commit(); await db.refresh(w)
@@ -550,7 +551,7 @@ async def list_products(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Product).order_by(Product.sku).limit(500))
     return [{"id": str(p.id), "sku": p.sku, "name": p.name, "unit_cost": p.unit_cost, "unit_price": p.unit_price, "reorder_point": p.reorder_point, "reorder_qty": p.reorder_qty, "is_active": p.is_active} for p in result.scalars().all()]
 
-@router.post("/products", status_code=201)
+@router.post("/products", status_code=201, dependencies=[Depends(require_permission("finance.inventory.manage"))])
 async def create_product(p: ProductCreate, db: AsyncSession = Depends(get_db)):
     pr = Product(**p.model_dump())
     db.add(pr); await db.commit(); await db.refresh(pr)
@@ -579,7 +580,7 @@ async def stock_levels(warehouse_id: UUID | None = None, db: AsyncSession = Depe
                     "quantity": round(qty or 0, 2), "below_reorder": (qty or 0) <= p.reorder_point})
     return out
 
-@router.post("/stock/movements", status_code=201)
+@router.post("/stock/movements", status_code=201, dependencies=[Depends(require_permission("finance.inventory.manage"))])
 async def create_movement(p: StockMovementCreate, db: AsyncSession = Depends(get_db)):
     m = StockMovement(**p.model_dump())
     db.add(m); await db.commit(); await db.refresh(m)
@@ -759,7 +760,7 @@ async def list_requisitions(status: str | None = None, db: AsyncSession = Depend
     result = await db.execute(q)
     return [{"id": str(r.id), "req_number": r.req_number, "status": r.status.value, "estimated_amount": r.estimated_amount, "needed_by": r.needed_by.isoformat()[:10] if r.needed_by else None, "converted_po_id": str(r.converted_po_id) if r.converted_po_id else None} for r in result.scalars().all()]
 
-@router.post("/requisitions", status_code=201)
+@router.post("/requisitions", status_code=201, dependencies=[Depends(require_permission("finance.requisition.manage"))])
 async def create_requisition(p: RequisitionCreate, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     total = sum((i.quantity or 1) * (i.unit_price or 0) for i in p.items)
     r = Requisition(project_id=p.project_id, requester_id=current_user.id, req_number=p.req_number,
@@ -771,7 +772,7 @@ async def create_requisition(p: RequisitionCreate, current_user=Depends(get_curr
     await db.commit(); await db.refresh(r)
     return {"id": str(r.id), "req_number": r.req_number, "estimated_amount": r.estimated_amount}
 
-@router.patch("/requisitions/{req_id}")
+@router.patch("/requisitions/{req_id}", dependencies=[Depends(require_permission("finance.requisition.manage"))])
 async def update_requisition_status(req_id: UUID, status: str = Query(...), db: AsyncSession = Depends(get_db)):
     r = await db.get(Requisition, req_id)
     if not r: raise HTTPException(404, "Not found")
@@ -781,7 +782,7 @@ async def update_requisition_status(req_id: UUID, status: str = Query(...), db: 
 class RequisitionConvert(BaseModel):
     vendor_id: UUID; po_number: str | None = None
 
-@router.post("/requisitions/{req_id}/convert")
+@router.post("/requisitions/{req_id}/convert", dependencies=[Depends(require_permission("finance.requisition.manage"))])
 async def convert_requisition(req_id: UUID, p: RequisitionConvert, db: AsyncSession = Depends(get_db)):
     r = await db.get(Requisition, req_id)
     if not r: raise HTTPException(404, "Not found")

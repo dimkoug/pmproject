@@ -41,6 +41,10 @@ from app.models.cross import (
     AuditEntry, ScheduledReport, ScheduledReportRun, Dashboard, DashboardWidget,
     SsoProvider, Workspace, WorkspaceMember,
 )
+from app.models.acl import (
+    Permission, Group, UserPermission, ProjectMember,
+    user_groups, group_permissions,
+)
 
 __all__ = [
     "User", "Project", "Stakeholder", "TeamMember", "Sprint",
@@ -63,4 +67,6 @@ __all__ = [
     "ApprovalRequest", "Webhook", "WebhookDelivery", "ApiKey",
     "AuditEntry", "ScheduledReport", "ScheduledReportRun", "Dashboard", "DashboardWidget",
     "SsoProvider", "Workspace", "WorkspaceMember",
+    "Permission", "Group", "UserPermission", "ProjectMember",
+    "user_groups", "group_permissions",
 ]

@@ -76,8 +76,8 @@ class ConnectionManager:
     async def _publish_to_redis(self, message: str) -> bool:
         """Publish a message to the ws:broadcast channel. Returns False if Redis unavailable."""
         try:
-            from app.cache import get_redis
-            r = await get_redis()
+            from app.cache import get_ws_redis
+            r = await get_ws_redis()
             await r.publish("ws:broadcast", message)
             return True
         except Exception:
@@ -86,8 +86,8 @@ class ConnectionManager:
     async def _redis_subscriber(self):
         """Background task that subscribes to Redis and pushes to local WebSockets."""
         try:
-            from app.cache import get_redis
-            r = await get_redis()
+            from app.cache import get_ws_redis
+            r = await get_ws_redis()
             pubsub = r.pubsub()
             await pubsub.subscribe("ws:broadcast")
             self._redis_available = True

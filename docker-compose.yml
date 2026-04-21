@@ -1,5 +1,5 @@
 services:
-  # ── PostgreSQL ─────────────────────────────────────────────────────
+  # ── PostgreSQL primary ─────────────────────────────────────────────
   db:
     image: postgres:16-alpine
     restart: always
@@ -19,7 +19,7 @@ services:
     command:
       - "postgres"
       - "-c"
-      - "max_connections=200"
+      - "max_connections=400"
       - "-c"
       - "shared_buffers=256MB"
       - "-c"
@@ -32,6 +32,30 @@ services:
       - "random_page_cost=1.1"
       - "-c"
       - "effective_io_concurrency=200"
+      - "-c"
+      - "wal_level=replica"
+      - "-c"
+      - "max_wal_senders=5"
+
+  # ── PostgreSQL read replica (optional; enable with --profile replica)
+  db-replica:
+    image: postgres:16-alpine
+    restart: always
+    profiles: ["replica"]
+    environment:
+      POSTGRES_USER: pmuser
+      POSTGRES_PASSWORD: pmpass
+      POSTGRES_DB: pmproject
+    volumes:
+      - pgreplica:/var/lib/postgresql/data
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pmuser -d pmproject"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   # ── PgBouncer — connection pooler ──────────────────────────────────
   pgbouncer:
@@ -51,20 +75,58 @@ services:
       timeout: 3s
       retries: 5
 
-  # ── Redis — cache, Celery broker, WebSocket pub/sub ────────────────
-  redis:
+  # ── Redis cache (hot data, read-through) ───────────────────────────
+  redis-cache:
     image: redis:7-alpine
     restart: always
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     volumes:
-      - redisdata:/data
+      - rediscache:/data
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Redis broker (Celery tasks + results) ──────────────────────────
+  redis-broker:
+    image: redis:7-alpine
+    restart: always
+    expose:
+      - "6379"
+    volumes:
+      - redisbroker:/data
     command: >
       redis-server
       --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy noeviction
       --save 60 1000
       --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Redis websocket pub/sub ────────────────────────────────────────
+  redis-ws:
+    image: redis:7-alpine
+    restart: always
+    expose:
+      - "6379"
+    command: >
+      redis-server
+      --maxmemory 128mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -83,12 +145,12 @@ services:
       - backend
       - frontend
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost/api/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/api/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
 
-  # ── FastAPI backend (multi-worker uvicorn behind Nginx) ────────────
+  # ── FastAPI backend (scalable; override with --scale backend=N) ────
   backend:
     build: ./backend
     restart: always
@@ -96,19 +158,28 @@ services:
       - "8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://pmuser:pmpass@pgbouncer:6432/pmproject
+      # Uncomment to route read-only endpoints to the replica (requires --profile replica):
+      # READ_DATABASE_URL: postgresql+asyncpg://pmuser:pmpass@pgbouncer:6432/pmproject_read
       SECRET_KEY: change-me-in-production
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://redis-cache:6379/0
+      REDIS_WS_URL: redis://redis-ws:6379/0
+      CELERY_BROKER_URL: redis://redis-broker:6379/0
+      CELERY_RESULT_BACKEND: redis://redis-broker:6379/1
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      redis-cache:
+        condition: service_healthy
+      redis-broker:
+        condition: service_healthy
+      redis-ws:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app
+    deploy:
+      replicas: 2
 
-  # ── Celery worker — async task processing ──────────────────────────
+  # ── Celery worker — default queue (lightweight work) ───────────────
   celery-worker:
     build: ./backend
     restart: always
@@ -121,13 +192,41 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://pmuser:pmpass@pgbouncer:6432/pmproject
       SECRET_KEY: change-me-in-production
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://redis-cache:6379/0
+      REDIS_WS_URL: redis://redis-ws:6379/0
+      CELERY_BROKER_URL: redis://redis-broker:6379/0
+      CELERY_RESULT_BACKEND: redis://redis-broker:6379/1
     depends_on:
       pgbouncer:
         condition: service_healthy
-      redis:
+      redis-broker:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app
+    deploy:
+      replicas: 2
+
+  # ── Celery worker — reports queue (heavy/slow jobs) ────────────────
+  celery-reports:
+    build: ./backend
+    restart: always
+    command: >
+      celery -A app.celery_app:celery worker
+      --loglevel=info
+      --concurrency=2
+      --max-tasks-per-child=50
+      -Q reports
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pmuser:pmpass@pgbouncer:6432/pmproject
+      SECRET_KEY: change-me-in-production
+      REDIS_URL: redis://redis-cache:6379/0
+      REDIS_WS_URL: redis://redis-ws:6379/0
+      CELERY_BROKER_URL: redis://redis-broker:6379/0
+      CELERY_RESULT_BACKEND: redis://redis-broker:6379/1
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis-broker:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app
@@ -142,11 +241,12 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://pmuser:pmpass@pgbouncer:6432/pmproject
       SECRET_KEY: change-me-in-production
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://redis-cache:6379/0
+      REDIS_WS_URL: redis://redis-ws:6379/0
+      CELERY_BROKER_URL: redis://redis-broker:6379/0
+      CELERY_RESULT_BACKEND: redis://redis-broker:6379/1
     depends_on:
-      redis:
+      redis-broker:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app
@@ -167,4 +267,6 @@ services:
 
 volumes:
   pgdata:
-  redisdata:
+  pgreplica:
+  rediscache:
+  redisbroker:

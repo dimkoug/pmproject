@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import Base, engine
+from app.database import Base, engine, read_engine
 from app.cache import get_redis, close_redis
 from app.routers import (
     auth,
@@ -29,6 +29,7 @@ from app.routers import (
     crm,
     dms,
     cross,
+    acl,
 )
 from app.websockets.manager import manager
 
@@ -40,10 +41,15 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     # Warm up Redis pool
     await get_redis()
+    # Seed ACL catalog (idempotent)
+    from app.acl.seed import seed_acl
+    await seed_acl()
     yield
     # Shutdown
     await close_redis()
     await engine.dispose()
+    if read_engine is not engine:
+        await read_engine.dispose()
 
 
 app = FastAPI(
@@ -84,6 +90,7 @@ app.include_router(erp.router)
 app.include_router(crm.router)
 app.include_router(dms.router)
 app.include_router(cross.router)
+app.include_router(acl.router)
 
 
 @app.websocket("/ws/{project_id}")

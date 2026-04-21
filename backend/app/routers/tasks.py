@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.acl.resolver import require_permission
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.task import Task
@@ -29,7 +30,7 @@ async def list_tasks(
     return result.scalars().all()
 
 
-@router.post("/", response_model=TaskRead, status_code=201)
+@router.post("/", response_model=TaskRead, status_code=201, dependencies=[Depends(require_permission("projects.task.create"))])
 async def create_task(payload: TaskCreate, db: AsyncSession = Depends(get_db)):
     task = Task(**payload.model_dump())
     db.add(task)
@@ -47,7 +48,7 @@ async def get_task(task_id: UUID, db: AsyncSession = Depends(get_db)):
     return task
 
 
-@router.patch("/{task_id}", response_model=TaskRead)
+@router.patch("/{task_id}", response_model=TaskRead, dependencies=[Depends(require_permission("projects.task.update"))])
 async def update_task(task_id: UUID, payload: TaskUpdate, db: AsyncSession = Depends(get_db)):
     task = await db.get(Task, task_id)
     if not task:
@@ -63,7 +64,7 @@ async def update_task(task_id: UUID, payload: TaskUpdate, db: AsyncSession = Dep
     return task
 
 
-@router.delete("/{task_id}", status_code=204)
+@router.delete("/{task_id}", status_code=204, dependencies=[Depends(require_permission("projects.task.delete"))])
 async def delete_task(task_id: UUID, db: AsyncSession = Depends(get_db)):
     task = await db.get(Task, task_id)
     if not task:

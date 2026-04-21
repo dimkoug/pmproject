@@ -141,9 +141,15 @@ export const APPS: AppDef[] = [
     accent: "#f1f5f9",
     description: "Workspace settings and audit",
     groups: [
-      { items: [
+      { title: "Overview", items: [
         { to: "/admin", label: "Settings", end: true },
         { to: "/admin/activity", label: "Activity Log" },
+      ]},
+      { title: "Access Control", items: [
+        { to: "/admin/acl/groups", label: "Groups" },
+        { to: "/admin/acl/permissions", label: "Permissions" },
+        { to: "/admin/acl/users", label: "Users" },
+        { to: "/admin/acl/inspector", label: "Permission Inspector" },
       ]},
     ],
   },
