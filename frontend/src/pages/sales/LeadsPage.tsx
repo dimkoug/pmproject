@@ -4,6 +4,7 @@ import {
 } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import { downloadCsv } from "../../shell/csvExport";
 
 const LEAD_STATUSES = ["new", "contacted", "qualified", "unqualified", "converted"];
 const LEAD_SOURCES = ["website", "referral", "cold_call", "advertising", "social_media", "event", "other"];
@@ -33,6 +34,7 @@ export default function LeadsPage() {
               refetch();
             },
           },
+          { key: "export", label: "Export CSV", onClick: () => downloadCsv("leads") },
         ]}
       />
       <div className="card" style={{ padding: 0 }}>

@@ -1,6 +1,7 @@
 import { useGetCompaniesQuery, useCreateCompanyMutation } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import { downloadCsv } from "../../shell/csvExport";
 
 export default function CompaniesPage() {
   const { data: companies = [], refetch } = useGetCompaniesQuery();
@@ -20,6 +21,7 @@ export default function CompaniesPage() {
               refetch();
             },
           },
+          { key: "export", label: "Export CSV", onClick: () => downloadCsv("companies") },
         ]}
       />
       <div className="card" style={{ padding: 0 }}>

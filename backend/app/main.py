@@ -31,6 +31,8 @@ from app.routers import (
     dms_public,
     cross,
     acl,
+    exports,
+    presence,
 )
 from app.websockets.manager import manager
 
@@ -66,6 +68,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Prometheus — expose /metrics with per-handler latency histograms
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+    Instrumentator(
+        excluded_handlers=["/metrics", "/api/health"],
+    ).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+except ImportError:
+    pass
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -99,6 +110,8 @@ app.include_router(dms.router)
 app.include_router(dms_public.router)
 app.include_router(cross.router)
 app.include_router(acl.router)
+app.include_router(exports.router)
+app.include_router(presence.router)
 
 
 @app.websocket("/ws/{project_id}")

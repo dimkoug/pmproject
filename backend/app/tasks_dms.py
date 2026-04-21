@@ -22,9 +22,11 @@ async def _run_expiry_reminders(days_ahead: int) -> dict:
     from app.database import async_session
     from app.models.dms import Document
     from app.models.notification import Notification
+    from app.models.user import User
 
     cutoff = datetime.utcnow() + timedelta(days=days_ahead)
     created = 0
+    emailed = 0
     async with async_session() as db:
         q = select(Document).where(
             Document.expiry_date.is_not(None),
@@ -58,8 +60,15 @@ async def _run_expiry_reminders(days_ahead: int) -> dict:
                 link=f"/documents",
             ))
             created += 1
+
+            # Also email the document owner
+            user = await db.get(User, doc.created_by_id)
+            if user and user.email:
+                from app.services.email import queue_expiry_reminder
+                queue_expiry_reminder(user.email, doc.title, days_left, str(doc.expiry_date.date()))
+                emailed += 1
         await db.commit()
-    return {"notifications_created": created, "days_ahead": days_ahead}
+    return {"notifications_created": created, "emails_queued": emailed, "days_ahead": days_ahead}
 
 
 @celery.task(name="run_expiry_reminders_task", bind=True, max_retries=1)

@@ -2,6 +2,7 @@ import { useGetInvoicesQuery, useCreateInvoiceMutation, useUpdateInvoiceStatusMu
 import { useProjectContext } from "../../shell/useProjectContext";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import { downloadCsv } from "../../shell/csvExport";
 
 const INVOICE_STATUSES = ["draft", "sent", "paid", "overdue", "cancelled"];
 
@@ -26,6 +27,7 @@ export default function InvoicesPage() {
               refetch();
             },
           },
+          { key: "export", label: "Export CSV", onClick: () => downloadCsv("invoices") },
         ]}
       />
       <div className="card" style={{ padding: 0 }}>

@@ -1,6 +1,7 @@
 import { useGetVendorsQuery, useCreateVendorMutation } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import { downloadCsv } from "../../shell/csvExport";
 
 export default function VendorsPage() {
   const { data: vendors = [], refetch } = useGetVendorsQuery();
@@ -19,6 +20,7 @@ export default function VendorsPage() {
               refetch();
             },
           },
+          { key: "export", label: "Export CSV", onClick: () => downloadCsv("vendors") },
         ]}
       />
       <div className="card" style={{ padding: 0 }}>

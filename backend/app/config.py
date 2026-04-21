@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     cache_ttl_dashboard: int = 30
     cache_ttl_reports: int = 60
 
+    # Email delivery (SMTP)
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_tls: bool = True
+    email_from: str = "PM Project <no-reply@pmproject.dev>"
+    app_base_url: str = "http://localhost"
+
     @property
     def effective_redis_ws_url(self) -> str:
         return self.redis_ws_url or self.redis_url

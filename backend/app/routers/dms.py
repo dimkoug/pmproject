@@ -487,6 +487,12 @@ async def request_signature(p: SignatureRequestCreate, current_user: User = Depe
     await log_audit(db, current_user, domain="dms", action="signature_requested", entity_type="document", entity_id=p.document_id,
                     after={"signer_email": p.signer_email})
     await db.commit(); await db.refresh(sig)
+
+    # Fire email to signer
+    doc = await db.get(Document, p.document_id)
+    if doc:
+        from app.services.email import queue_signature_request
+        queue_signature_request(p.signer_email, doc.title, sig.token, p.message)
     return {"id": str(sig.id), "token": sig.token}
 
 @router.post("/signatures/{token}/sign")

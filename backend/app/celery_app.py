@@ -47,6 +47,7 @@ celery.conf.update(
         "run_recurring_invoices_task": {"queue": "reports"},
         "run_expiry_reminders_task": {"queue": "reports"},
         "run_retention_task": {"queue": "reports"},
+        "send_email_task": {"queue": "reports"},
     },
     # Celery Beat schedule — nightly housekeeping.
     beat_schedule={
@@ -66,3 +67,4 @@ celery.conf.update(
 celery.autodiscover_tasks(["app"])
 # Explicit import so the task module is registered on worker startup
 import app.tasks_dms  # noqa: F401, E402
+import app.services.email  # noqa: F401, E402  (registers send_email_task)

@@ -284,6 +284,9 @@ export const apiSlice = createApi({
     markAllRead: builder.mutation<any, void>({
       query: () => ({ url: "/notifications/read-all", method: "POST" }),
     }),
+    markNotificationRead: builder.mutation<any, string>({
+      query: (id) => ({ url: `/notifications/${id}/read`, method: "POST" }),
+    }),
 
     // Templates
     getTemplates: builder.query<any[], void>({
@@ -817,6 +820,7 @@ export const {
   useGetNotificationsQuery,
   useGetUnreadCountQuery,
   useMarkAllReadMutation,
+  useMarkNotificationReadMutation,
   useGetTemplatesQuery,
   useCreateTemplateMutation,
   useApplyTemplateMutation,

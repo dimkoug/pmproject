@@ -2,6 +2,7 @@ import { useGetExpensesQuery, useCreateExpenseMutation } from "../../services/ap
 import { useProjectContext } from "../../shell/useProjectContext";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import { downloadCsv } from "../../shell/csvExport";
 
 const CATEGORIES = ["labor", "materials", "equipment", "travel", "software", "consulting", "overhead", "other"];
 
@@ -25,6 +26,7 @@ export default function ExpensesPage() {
               refetch();
             },
           },
+          { key: "export", label: "Export CSV", onClick: () => downloadCsv("expenses") },
         ]}
       />
       <div className="card" style={{ padding: 0 }}>

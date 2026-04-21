@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,7 +9,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.comment import Comment
+from app.models.notification import Notification
 from app.models.user import User
+
+# Matches @name or @first.last — words-with-dots after an @ sign
+_MENTION_RE = re.compile(r"@([A-Za-z0-9._-]+)")
+
+
+async def _resolve_mentions(db: AsyncSession, body: str, actor: User, exclude_self: bool = True) -> list[User]:
+    """Find all @handles in `body` and return matching User rows. A handle
+    matches either the part before @ in email (e.g. @alice for alice@x.com)
+    or the user's name (dot-separated)."""
+    handles = set(_MENTION_RE.findall(body))
+    if not handles: return []
+    matched: list[User] = []
+    # Normalise handles for loose comparison
+    norm_handles = {h.lower() for h in handles}
+    rows = (await db.scalars(select(User).where(User.is_active == True))).all()  # noqa: E712
+    for u in rows:
+        if exclude_self and u.id == actor.id:
+            continue
+        email_local = (u.email or "").split("@", 1)[0].lower()
+        name_slug = (u.name or "").lower().replace(" ", ".")
+        if email_local in norm_handles or name_slug in norm_handles:
+            matched.append(u)
+    return matched
 
 router = APIRouter(prefix="/api/comments", tags=["comments"], dependencies=[Depends(get_current_user)])
 
@@ -72,9 +97,29 @@ async def create_comment(
         body=payload.body,
     )
     db.add(comment)
+
+    # Create in-app notifications for each @mentioned user + email them
+    mentioned = await _resolve_mentions(db, payload.body, current_user)
+    link = f"/projects/{payload.project_id}/{payload.target_type}s"
+    for m in mentioned:
+        db.add(Notification(
+            user_id=m.id,
+            project_id=payload.project_id,
+            title=f"{current_user.name} mentioned you",
+            body=payload.body[:280],
+            link=link,
+        ))
+        if m.email:
+            from app.services.email import queue_mention_notification
+            queue_mention_notification(m.email, current_user.name, f"a comment on {payload.target_type}", link)
+
     await db.commit()
     await db.refresh(comment)
-    return {"id": str(comment.id), "body": comment.body, "user_name": current_user.name, "created_at": comment.created_at.isoformat()}
+    return {
+        "id": str(comment.id), "body": comment.body, "user_name": current_user.name,
+        "created_at": comment.created_at.isoformat(),
+        "mentioned_user_ids": [str(m.id) for m in mentioned],
+    }
 
 
 @router.delete("/{comment_id}", status_code=204)

@@ -6,6 +6,7 @@ import BoardColumn from "../../components/dnd/BoardColumn";
 import DraggableCard from "../../components/dnd/DraggableCard";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import { downloadCsv } from "../../shell/csvExport";
 
 const OPP_STAGES = ["prospecting", "qualification", "proposal", "negotiation", "closed_won", "closed_lost"];
 
@@ -29,6 +30,7 @@ export default function OpportunitiesPage() {
               refetch();
             },
           },
+          { key: "export", label: "Export CSV", onClick: () => downloadCsv("opportunities") },
         ]}
       />
       <BoardContainer
