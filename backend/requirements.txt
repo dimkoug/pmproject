@@ -18,3 +18,5 @@ pypdf==5.1.0
 redis[hiredis]==5.2.1
 celery[redis]==5.4.0
 aioredis==2.0.1
+# --- Seeding ---
+Faker==40.4.0

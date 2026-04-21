@@ -1,5 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./components/ProtectedRoute";
+import SuiteShell from "./layouts/SuiteShell";
+import AppLayout from "./layouts/AppLayout";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import ProjectList from "./pages/ProjectList";
@@ -36,35 +38,61 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
-      <Route path="/" element={<ProtectedRoute><ProjectList /></ProtectedRoute>} />
-      <Route path="/portfolio" element={<ProtectedRoute><PortfolioPage /></ProtectedRoute>} />
-      <Route path="/projects/:projectId" element={<ProtectedRoute><ProjectLayout /></ProtectedRoute>}>
-        <Route index element={<DashboardPage />} />
-        <Route path="tasks" element={<TasksPage />} />
-        <Route path="gantt" element={<GanttPage />} />
-        <Route path="calendar" element={<CalendarPage />} />
-        <Route path="schedule" element={<SchedulePage />} />
-        <Route path="sprints" element={<SprintPage />} />
-        <Route path="team" element={<TeamPage />} />
-        <Route path="workload" element={<WorkloadPage />} />
-        <Route path="time-tracking" element={<TimeTrackingPage />} />
-        <Route path="stakeholders" element={<StakeholdersPage />} />
-        <Route path="risks" element={<RisksPage />} />
-        <Route path="deliverables" element={<DeliverablesPage />} />
-        <Route path="changes" element={<ChangeRequestsPage />} />
-        <Route path="evm" element={<EvmPage />} />
-        <Route path="burndown" element={<BurndownPage />} />
-        <Route path="monte-carlo" element={<MonteCarloPage />} />
-        <Route path="baselines" element={<BaselinePage />} />
-        <Route path="measurements" element={<MeasurementsPage />} />
-        <Route path="lessons" element={<LessonsPage />} />
-        <Route path="activity" element={<ActivityLogPage />} />
-        <Route path="reports" element={<ReportsPage />} />
-        <Route path="erp" element={<ErpPage />} />
-        <Route path="crm" element={<CrmPage />} />
-        <Route path="dms" element={<DmsPage />} />
-        <Route path="admin" element={<AdminPage />} />
+
+      <Route element={<ProtectedRoute><SuiteShell /></ProtectedRoute>}>
+        {/* Projects app */}
+        <Route element={<AppLayout />}>
+          <Route index element={<ProjectList />} />
+          <Route path="portfolio" element={<PortfolioPage />} />
+        </Route>
+
+        {/* Project workspace (inner sidebar) */}
+        <Route path="projects/:projectId" element={<ProjectLayout />}>
+          <Route index element={<DashboardPage />} />
+          <Route path="tasks" element={<TasksPage />} />
+          <Route path="gantt" element={<GanttPage />} />
+          <Route path="calendar" element={<CalendarPage />} />
+          <Route path="schedule" element={<SchedulePage />} />
+          <Route path="sprints" element={<SprintPage />} />
+          <Route path="team" element={<TeamPage />} />
+          <Route path="workload" element={<WorkloadPage />} />
+          <Route path="time-tracking" element={<TimeTrackingPage />} />
+          <Route path="stakeholders" element={<StakeholdersPage />} />
+          <Route path="risks" element={<RisksPage />} />
+          <Route path="deliverables" element={<DeliverablesPage />} />
+          <Route path="changes" element={<ChangeRequestsPage />} />
+          <Route path="evm" element={<EvmPage />} />
+          <Route path="burndown" element={<BurndownPage />} />
+          <Route path="monte-carlo" element={<MonteCarloPage />} />
+          <Route path="baselines" element={<BaselinePage />} />
+          <Route path="measurements" element={<MeasurementsPage />} />
+          <Route path="lessons" element={<LessonsPage />} />
+          <Route path="activity" element={<ActivityLogPage />} />
+          <Route path="reports" element={<ReportsPage />} />
+        </Route>
+
+        {/* Org-wide apps */}
+        <Route path="sales" element={<AppLayout />}>
+          <Route index element={<CrmPage />} />
+          <Route path=":tab" element={<CrmPage />} />
+        </Route>
+
+        <Route path="finance" element={<AppLayout />}>
+          <Route index element={<ErpPage />} />
+          <Route path=":tab" element={<ErpPage />} />
+        </Route>
+
+        <Route path="documents" element={<AppLayout />}>
+          <Route index element={<DmsPage />} />
+          <Route path=":tab" element={<DmsPage />} />
+        </Route>
+
+        <Route path="admin" element={<AppLayout />}>
+          <Route index element={<AdminPage />} />
+          <Route path="activity" element={<ActivityLogPage />} />
+        </Route>
       </Route>
+
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

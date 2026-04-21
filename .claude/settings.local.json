@@ -39,7 +39,10 @@
       "Bash(C:/Users/u779/projects/pmproject/venv/Scripts/python.exe *)",
       "Bash(kill 5111)",
       "Bash(python:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(docker:*)",
+      "Bash(netstat:*)",
+      "Bash(npx vite *)"
     ]
   }
 }

@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useProjectContext } from "../shell/useProjectContext";
 import {
   useGetDmsDashboardQuery, useGetFoldersQuery, useCreateFolderMutation,
   useGetDocumentsQuery, useGetDocVersionsQuery, useSearchDocumentsQuery,
@@ -17,8 +18,14 @@ const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const DMS_TABS = ["files", "signatures", "templates", "retention", "locks", "workflows", "annotations", "scans"] as const;
 
 export default function DmsPage() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const [tab, setTab] = useState<typeof DMS_TABS[number]>("files");
+  const projectId = useProjectContext();
+  const { tab: urlTab } = useParams<{ tab?: string }>();
+  const [tab, setTab] = useState<typeof DMS_TABS[number]>(
+    (DMS_TABS as readonly string[]).includes(urlTab || "") ? (urlTab as typeof DMS_TABS[number]) : "files"
+  );
+  useEffect(() => {
+    if (urlTab && (DMS_TABS as readonly string[]).includes(urlTab)) setTab(urlTab as typeof DMS_TABS[number]);
+  }, [urlTab]);
   const [currentFolder, setCurrentFolder] = useState<string | undefined>(undefined);
   const [folderPath, setFolderPath] = useState<{id: string; name: string}[]>([]);
   const { data: dash } = useGetDmsDashboardQuery(projectId);

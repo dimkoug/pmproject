@@ -35,10 +35,10 @@ services:
 
   # ── PgBouncer — connection pooler ──────────────────────────────────
   pgbouncer:
-    image: edoburu/pgbouncer:1.22.0
+    image: edoburu/pgbouncer:latest
     restart: always
-    ports:
-      - "6432:6432"
+    expose:
+      - "6432"
     volumes:
       - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
       - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
@@ -158,7 +158,7 @@ services:
     expose:
       - "3000"
     environment:
-      VITE_API_URL: http://localhost/api
+      VITE_API_URL: http://localhost
       VITE_WS_URL: ws://localhost/ws
     depends_on:
       - backend

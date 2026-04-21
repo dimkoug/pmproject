@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
 import {
   useGetCrmDashboardQuery, useGetCompaniesQuery, useCreateCompanyMutation,
   useGetCrmContactsQuery, useCreateCrmContactMutation, useGetLeadsQuery, useCreateLeadMutation,
@@ -26,7 +27,13 @@ const OPP_STAGES = ["prospecting", "qualification", "proposal", "negotiation", "
 const LEAD_STATUSES = ["new", "contacted", "qualified", "unqualified", "converted"];
 
 export default function CrmPage() {
-  const [tab, setTab] = useState<typeof TABS[number]>("dashboard");
+  const { tab: urlTab } = useParams<{ tab?: string }>();
+  const [tab, setTab] = useState<typeof TABS[number]>(
+    (TABS as readonly string[]).includes(urlTab || "") ? (urlTab as typeof TABS[number]) : "dashboard"
+  );
+  useEffect(() => {
+    if (urlTab && (TABS as readonly string[]).includes(urlTab)) setTab(urlTab as typeof TABS[number]);
+  }, [urlTab]);
   const { data: dash } = useGetCrmDashboardQuery();
   const { data: companies = [], refetch: rCo } = useGetCompaniesQuery();
   const { data: contacts = [], refetch: rCt } = useGetCrmContactsQuery(undefined);

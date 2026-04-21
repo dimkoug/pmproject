@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useProjectContext } from "../shell/useProjectContext";
 import {
   useGetErpDashboardQuery, useGetInvoicesQuery, useCreateInvoiceMutation,
   useGetExpensesQuery, useCreateExpenseMutation, useGetVendorsQuery, useCreateVendorMutation,
@@ -24,8 +25,14 @@ const TABS = ["dashboard", "invoices", "expenses", "vendors", "purchase-orders",
   "inventory", "depreciation", "credit-notes", "pnl", "balance-sheet", "cash-flow", "requisitions"] as const;
 
 export default function ErpPage() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const [tab, setTab] = useState<typeof TABS[number]>("dashboard");
+  const projectId = useProjectContext();
+  const { tab: urlTab } = useParams<{ tab?: string }>();
+  const [tab, setTab] = useState<typeof TABS[number]>(
+    (TABS as readonly string[]).includes(urlTab || "") ? (urlTab as typeof TABS[number]) : "dashboard"
+  );
+  useEffect(() => {
+    if (urlTab && (TABS as readonly string[]).includes(urlTab)) setTab(urlTab as typeof TABS[number]);
+  }, [urlTab]);
   const { data: dash } = useGetErpDashboardQuery(projectId);
   const { data: invoices = [], refetch: rInv } = useGetInvoicesQuery(projectId);
   const { data: expenses = [], refetch: rExp } = useGetExpensesQuery(projectId);

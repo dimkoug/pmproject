@@ -1,21 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useGetProjectsQuery, useCreateProjectMutation, useDeleteProjectMutation } from "../services/api";
-import { useAppSelector, useAppDispatch } from "../app/hooks";
-import { logout } from "../services/authSlice";
 
 export default function ProjectList() {
   const { data: projects = [], isLoading } = useGetProjectsQuery();
   const [createProject] = useCreateProjectMutation();
   const [deleteProject] = useDeleteProjectMutation();
   const navigate = useNavigate();
-  const user = useAppSelector((s) => s.auth.user);
-  const dispatch = useAppDispatch();
-
-  const handleLogout = () => {
-    dispatch(logout());
-    navigate("/login");
-  };
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", description: "", development_approach: "predictive" });
 
@@ -27,34 +18,23 @@ export default function ProjectList() {
   };
 
   if (isLoading) return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
       <p style={{ color: "var(--gray-400)" }}>Loading projects...</p>
     </div>
   );
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "2.5rem 2rem" }}>
-      {/* Top bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.35rem" }}>
+    <div>
+      <div className="page-header">
         <div>
-          <h1 style={{ fontSize: "1.6rem", fontWeight: 700, letterSpacing: "-0.03em", color: "var(--gray-900)" }}>
-            Projects
-          </h1>
+          <h1 className="page-title">Projects</h1>
+          <p className="page-subtitle">PMBOK 7th Edition &middot; 8 Performance Domains</p>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-          {user && (
-            <span style={{ fontSize: "0.82rem", color: "var(--gray-500)", fontWeight: 500, marginRight: "0.25rem" }}>
-              {user.name}
-            </span>
-          )}
           <button className="btn" onClick={() => navigate("/portfolio")}>Portfolio</button>
           <button className="btn btn-primary" onClick={() => setShowForm(true)}>+ New Project</button>
-          <button className="btn" onClick={handleLogout} style={{ color: "var(--gray-500)" }}>Sign out</button>
         </div>
       </div>
-      <p style={{ color: "var(--gray-400)", marginBottom: "2rem", fontSize: "0.875rem" }}>
-        PMBOK 7th Edition - 8 Performance Domains
-      </p>
 
       {showForm && (
         <div className="modal-overlay" onClick={() => setShowForm(false)}>

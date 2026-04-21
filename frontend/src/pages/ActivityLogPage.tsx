@@ -1,9 +1,9 @@
-import { useParams } from "react-router-dom";
+import { useProjectContext } from "../shell/useProjectContext";
 import { useGetActivityQuery } from "../services/api";
 
 export default function ActivityLogPage() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const { data: activities = [] } = useGetActivityQuery(projectId!);
+  const projectId = useProjectContext();
+  const { data: activities = [] } = useGetActivityQuery(projectId ?? "");
 
   return (
     <div>
