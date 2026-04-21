@@ -1,7 +1,59 @@
-venv/
+# ── Python ───────────────────────────────────────────────────────────
 __pycache__/
-*.pyc
-node_modules/
-dist/
-.env
+*.py[cod]
+*$py.class
+*.so
 *.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# ── Virtual environments ─────────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── Testing ──────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+test.db
+
+# ── IDE / editors ────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Node / Frontend ──────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# ── Environment & secrets ────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Docker ───────────────────────────────────────────────────────────
+docker-compose.override.yml
+
+# ── Celery ───────────────────────────────────────────────────────────
+celerybeat-schedule
+celerybeat-schedule.db
+
+# ── Logs ─────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Database ─────────────────────────────────────────────────────────
+*.sqlite3
+
+# ── OS files ─────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
