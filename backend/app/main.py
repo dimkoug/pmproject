@@ -1,3 +1,16 @@
+"""FastAPI application entry point.
+
+Wires the full HTTP surface:
+  * Lifespan handles DDL (`create_all` under an advisory lock for replica
+    safety), additive column migrations, Redis warm-up, ACL seed,
+    workspace seed, and a graceful shutdown drain.
+  * Middleware stack: request-id propagation + JSON access logs + per-user
+    rate limit + CORS. Prometheus /metrics is mounted when the optional
+    instrumentator is installed.
+  * Routers are registered bottom-up; order doesn't matter for FastAPI
+    but keeps the import list readable.
+  * `/api/health` reports DB + Redis status (503 on dependency failure).
+"""
 import asyncio
 import json
 import logging
@@ -124,10 +137,18 @@ try:
 except ImportError:
     pass
 
+# CORS allow-list comes from config (CORS_ORIGINS env var, or app_base_url
+# fallback). "*" + allow_credentials=True is a spec violation — browsers reject
+# it — so when a wildcard is configured we drop the credentials flag rather
+# than silently shipping a broken policy.
+_cors_origins = _settings.effective_cors_origins
+_cors_allow_creds = True
+if any(o == "*" for o in _cors_origins):
+    _cors_allow_creds = False
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins or ["*"],
+    allow_credentials=_cors_allow_creds,
     allow_methods=["*"],
     allow_headers=["*"],
 )

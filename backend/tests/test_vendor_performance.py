@@ -7,7 +7,7 @@ Covers:
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import AsyncClient
@@ -24,7 +24,7 @@ async def _make_po(client: AsyncClient, vendor_id: str, delivery_date: datetime 
     # Use the real router POST for PO
     payload = {
         "vendor_id": vendor_id,
-        "po_number": f"PO-{datetime.utcnow().timestamp():.0f}",
+        "po_number": f"PO-{datetime.now(timezone.utc).timestamp():.0f}",
         "total_amount": total,
     }
     r = await client.post("/api/erp/purchase-orders", json=payload)
@@ -91,7 +91,7 @@ class TestPerformanceAggregate:
     async def test_on_time_rate_computed(self, client: AsyncClient):
         """Two POs received on time, one received late → on_time_rate = 2/3."""
         v = await _make_vendor(client)
-        base = datetime.utcnow()
+        base = datetime.now(timezone.utc)
         # On-time × 2
         po1 = await _make_po(client, v["id"], base + timedelta(days=5))
         po2 = await _make_po(client, v["id"], base + timedelta(days=5))

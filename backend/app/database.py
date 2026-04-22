@@ -1,3 +1,17 @@
+"""SQLAlchemy async engine setup + session factories.
+
+Two engines, one session factory each:
+  * `engine` + `async_session`: primary — writes and general reads.
+  * `read_engine` + `read_async_session`: optional read replica for heavy
+    analytics (dashboards, P&L, cash flow). Falls back to the primary when
+    no `read_database_url` is configured so consumers can depend on
+    `get_read_db` unconditionally.
+
+Connection pool behaviour switches between NullPool (when the URL contains
+`pgbouncer`, since PgBouncer is already pooling for us and prepared
+statements aren't compatible with its transaction mode) and a standard pool
+with pre-ping + recycle for direct-to-Postgres connections.
+"""
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
@@ -44,6 +58,10 @@ class Base(DeclarativeBase):
 
 
 async def get_db() -> AsyncSession:
+    """FastAPI dependency that yields a session against the primary engine.
+    The session is committed/rolled-back and closed automatically when the
+    request handler returns — downstream code only needs to call
+    `await db.commit()` at meaningful transaction boundaries."""
     async with async_session() as session:
         yield session
 

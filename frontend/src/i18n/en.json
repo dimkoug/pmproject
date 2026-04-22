@@ -50,5 +50,15 @@
     "dashboard": "Dashboard",
     "overview": "Overview",
     "reports": "Reports"
+  },
+  "onboarding": {
+    "eyebrow": "Getting started",
+    "title": "Welcome to PM Project",
+    "skip": "Skip for now",
+    "back": "Back",
+    "finish": "Finish",
+    "markDone": "Mark done & continue",
+    "progress": "{{done}} of {{total}} complete",
+    "welcomeCopy": "This quick setup takes about a minute. You can skip any step and come back to it from Settings → Getting started."
   }
 }

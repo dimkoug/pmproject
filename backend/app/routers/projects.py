@@ -76,10 +76,10 @@ async def update_project(project_id: UUID, payload: ProjectUpdate, db: AsyncSess
 async def delete_project(project_id: UUID, db: AsyncSession = Depends(get_db)):
     """Soft-delete: sets `deleted_at` rather than removing the row. Visible
     in /admin/trash for 30 days; purge or restore from there."""
-    from datetime import datetime
+    from datetime import datetime, timezone
     project = await db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    project.deleted_at = datetime.utcnow()
+    project.deleted_at = datetime.now(timezone.utc)
     await db.commit()
     await manager.broadcast_all("project_deleted", {"id": str(project_id)})

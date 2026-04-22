@@ -8,7 +8,7 @@ enough on hand.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
@@ -62,7 +62,7 @@ async def issue_fifo(
             movement_type=MovementType.ISSUE,
             quantity=-take, unit_cost=b.cost_per_unit,
             batch_id=b.id, reference=reference, notes=notes,
-            movement_date=datetime.utcnow(),
+            movement_date=datetime.now(timezone.utc),
         ))
         consumed.append({
             "batch_id": str(b.id), "batch_code": b.batch_code,

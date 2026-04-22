@@ -1,6 +1,6 @@
 """HR — employees, leave requests, attendance."""
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -245,7 +245,7 @@ async def decide_leave(
         raise HTTPException(400, "decision must be approved or rejected")
     lr.status = p.decision
     lr.approver_id = current_user.id
-    lr.decided_at = datetime.utcnow()
+    lr.decided_at = datetime.now(timezone.utc)
     lr.decision_note = p.note
     await db.commit()
     return _leave_dict(lr)
@@ -351,7 +351,7 @@ async def check_in(
     a = Attendance(
         employee_id=emp.id,
         work_date=today,
-        check_in=datetime.utcnow(),
+        check_in=datetime.now(timezone.utc),
         source=source,
     )
     db.add(a)
@@ -377,7 +377,7 @@ async def check_out(current_user: User = Depends(get_current_user), db: AsyncSes
     a = existing.scalars().first()
     if not a:
         raise HTTPException(400, "No open check-in for today — call /attendance/check-in first")
-    a.check_out = datetime.utcnow()
+    a.check_out = datetime.now(timezone.utc)
     a.hours_worked = _hours_between(a.check_in, a.check_out)
     await db.commit()
     return _attendance_dict(a, emp)
@@ -523,7 +523,7 @@ async def submit_timesheet(
     if ts.total_hours <= 0:
         raise HTTPException(400, "Cannot submit an empty timesheet — log time entries first")
     ts.status = TimesheetStatus.SUBMITTED
-    ts.submitted_at = datetime.utcnow()
+    ts.submitted_at = datetime.now(timezone.utc)
     await db.commit()
     return _timesheet_dict(ts, current_user.name)
 
@@ -567,7 +567,7 @@ async def decide_timesheet(
         raise HTTPException(400, "decision must be approved or rejected")
     ts.status = p.decision
     ts.approver_id = current_user.id
-    ts.decided_at = datetime.utcnow()
+    ts.decided_at = datetime.now(timezone.utc)
     ts.decision_note = p.note
     await db.commit()
     return _timesheet_dict(ts)

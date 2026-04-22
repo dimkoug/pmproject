@@ -32,8 +32,10 @@ class TemplateIn(BaseModel):
     body_html: str | None = None
 
 
-@admin_router.get("")
+@admin_router.get("", dependencies=[Depends(require_permission("admin.email.manage"))])
 async def list_templates(db: AsyncSession = Depends(get_db)):
+    """List all transactional email templates. Gated behind admin.email.manage
+    because template keys + subjects can reveal internal product copy."""
     rows = (await db.execute(select(EmailTemplate).order_by(EmailTemplate.key))).scalars().all()
     return [{"id": str(t.id), "key": t.key, "subject": t.subject, "updated_at": t.updated_at.isoformat()} for t in rows]
 
@@ -48,8 +50,10 @@ async def create_template(p: TemplateIn, db: AsyncSession = Depends(get_db)):
     return {"id": str(t.id), "key": t.key}
 
 
-@admin_router.get("/{key}")
+@admin_router.get("/{key}", dependencies=[Depends(require_permission("admin.email.manage"))])
 async def get_template(key: str, db: AsyncSession = Depends(get_db)):
+    """Fetch a single template by key (e.g. 'password_reset'). Admin-gated for
+    the same info-disclosure reason as list_templates."""
     row = (await db.execute(select(EmailTemplate).where(EmailTemplate.key == key))).scalar_one_or_none()
     if not row:
         raise HTTPException(404, "Template not found")

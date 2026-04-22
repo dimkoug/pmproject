@@ -35,11 +35,17 @@ def _safe(s: str | None) -> str:
 
 
 def _fmt_money(amount: float, currency: str = "USD") -> str:
+    """Format a currency amount with a latin-1-safe symbol or code. USD
+    gets `$`; EUR/GBP get ASCII prefixes (not the glyphs) because fpdf2's
+    bundled Helvetica can't render them without embedding a TTF."""
     symbol = {"USD": "$", "EUR": "EUR ", "GBP": "GBP "}.get(currency.upper(), currency.upper() + " ")
     return f"{symbol}{amount:,.2f}"
 
 
 def _header(pdf: FPDF, doc_title: str, doc_number: str) -> None:
+    """Paint the branded header band + document title + `#number` subtitle.
+    Resets text color back to near-black before returning so the caller
+    doesn't have to remember to do so."""
     pdf.set_fill_color(*BRAND_PRIMARY)
     pdf.rect(0, 0, 210, 28, "F")
     pdf.set_text_color(255, 255, 255)
@@ -54,6 +60,8 @@ def _header(pdf: FPDF, doc_title: str, doc_number: str) -> None:
 
 
 def _two_col(pdf: FPDF, left_label: str, left_val: str, right_label: str, right_val: str) -> None:
+    """Render a label/value pair in two columns (95mm each) — used for
+    Bill From / Bill To, Issue date / Due date, Status / Amount due."""
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*MUTED)
     pdf.cell(95, 5, _safe(left_label.upper()), ln=0)
@@ -66,6 +74,10 @@ def _two_col(pdf: FPDF, left_label: str, left_val: str, right_label: str, right_
 
 
 def _lines_table(pdf: FPDF, lines: list[dict], currency: str) -> None:
+    """Render the invoice/quote line items as a Description/Qty/Unit/Amount
+    table. Each `line` is a dict with keys `description`, `quantity`,
+    `unit_price`, `amount`. Long descriptions are truncated to 70 chars
+    so they don't overflow the column."""
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_fill_color(242, 244, 248)
     pdf.set_text_color(*MUTED)
@@ -84,6 +96,9 @@ def _lines_table(pdf: FPDF, lines: list[dict], currency: str) -> None:
 
 
 def _totals_block(pdf: FPDF, subtotal: float, tax: float, total: float, currency: str) -> None:
+    """Right-aligned Subtotal/Tax/Total block under the line table. Total
+    is emphasised in brand colour + bold to match the invoice template
+    standard — callers shouldn't override those after this returns."""
     pdf.set_font("Helvetica", "", 10)
     x = 120
     for label, value in [("Subtotal", subtotal), ("Tax", tax)]:
@@ -99,6 +114,8 @@ def _totals_block(pdf: FPDF, subtotal: float, tax: float, total: float, currency
 
 
 def _footer(pdf: FPDF, note: str | None) -> None:
+    """Append a muted italic note at the end of the document (for invoice
+    `notes` or quote `terms`). No-op when the note is empty/None."""
     if not note:
         return
     pdf.ln(8)

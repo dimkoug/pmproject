@@ -50,5 +50,15 @@
     "dashboard": "Panel",
     "overview": "Resumen",
     "reports": "Informes"
+  },
+  "onboarding": {
+    "eyebrow": "Primeros pasos",
+    "title": "Bienvenido a PM Project",
+    "skip": "Omitir por ahora",
+    "back": "Atrás",
+    "finish": "Finalizar",
+    "markDone": "Marcar como hecho y continuar",
+    "progress": "{{done}} de {{total}} completados",
+    "welcomeCopy": "Esta configuración rápida lleva aproximadamente un minuto. Puedes omitir cualquier paso y volver después desde Configuración → Primeros pasos."
   }
 }

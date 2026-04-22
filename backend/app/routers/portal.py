@@ -19,7 +19,7 @@ The portal JWT carries `kind="portal"` + `company_id` and is short-lived.
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -64,7 +64,7 @@ async def create_magic_link(p: MagicLinkRequest, db: AsyncSession = Depends(get_
     company = await db.get(Company, p.company_id)
     if not company:
         raise HTTPException(404, "Company not found")
-    expires = datetime.utcnow() + timedelta(hours=max(1, p.expires_in_hours))
+    expires = datetime.now(timezone.utc) + timedelta(hours=max(1, p.expires_in_hours))
     raw = secrets.token_urlsafe(32)
     pt = PortalToken(
         company_id=p.company_id,
@@ -107,7 +107,7 @@ class ExchangeRequest(BaseModel):
 
 
 def _make_portal_jwt(company_id: UUID) -> str:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": str(company_id),
         "kind": PORTAL_JWT_KIND,
@@ -133,15 +133,6 @@ def _verify_portal_jwt(token: str) -> UUID:
         raise HTTPException(401, "Bad company id")
 
 
-async def get_portal_company(
-    authorization: str | None = None,
-    db: AsyncSession = Depends(get_db),
-) -> Company:
-    """Dependency that pulls the Company from the portal Authorization header."""
-    from fastapi import Header
-    raise NotImplementedError  # never called — see _resolve_portal_company below
-
-
 async def _resolve_portal_company(
     authorization: str | None,
     db: AsyncSession,
@@ -165,12 +156,12 @@ async def exchange_token(p: ExchangeRequest, db: AsyncSession = Depends(get_db))
     pt = r.scalar_one_or_none()
     if not pt:
         raise HTTPException(401, "Invalid token")
-    if pt.expires_at and pt.expires_at < datetime.utcnow():
+    if pt.expires_at and pt.expires_at < datetime.now(timezone.utc):
         raise HTTPException(401, "Token expired")
     if pt.used_at:
         # Single-use; if you want re-use, comment this out
         raise HTTPException(401, "Token already used")
-    pt.used_at = datetime.utcnow()
+    pt.used_at = datetime.now(timezone.utc)
     await db.commit()
     company = await db.get(Company, pt.company_id)
     if not company:

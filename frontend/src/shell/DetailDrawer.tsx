@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "./icons";
 import TagPicker from "./TagPicker";
 
-export type DrawerTabKey = "overview" | "activity" | "comments" | "attachments" | "history";
+export type DrawerTabKey = "overview" | "activity" | "comments" | "attachments" | "history" | "performance";
 
 export type DrawerContext = {
   entity: string;
@@ -63,6 +63,7 @@ export function useDrawerPeek() {
 
 const TAB_ORDER: { key: DrawerTabKey; label: string }[] = [
   { key: "overview", label: "Overview" },
+  { key: "performance", label: "Performance" },
   { key: "activity", label: "Activity" },
   { key: "comments", label: "Comments" },
   { key: "attachments", label: "Attachments" },

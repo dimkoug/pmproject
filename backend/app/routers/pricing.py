@@ -1,7 +1,21 @@
-"""Pricing + returns router (#2, #3)."""
+"""Pricing + returns router (#2, #3).
+
+Two independent FastAPI routers mounted in `main.py`:
+
+  * `router` at `/api/pricing` — named price lists (with quantity tiers),
+    coupon + auto-apply discount rules, and a cart-quote preview that
+    consumers (storefront, quote builder) call to preview totals without
+    persisting anything.
+  * `returns_router` at `/api/returns` — RMA lifecycle
+    (requested → approved → received → refunded | rejected) with
+    per-line refund amount aggregation.
+
+All mutating endpoints are gated behind `finance.pricing.manage` or
+`finance.refund.manage` permissions.
+"""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -12,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.acl.resolver import require_permission
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models.erp import Invoice, InvoiceItem, InvoiceStatus
+from app.models.erp import Invoice
 from app.models.pricing import (
     DiscountRule, DiscountType, PriceList, PriceListItem,
     ReturnLine, ReturnMerchandise, ReturnStatus,
@@ -39,6 +53,9 @@ class PriceListItemIn(BaseModel):
 
 @router.get("/lists")
 async def list_price_lists(db: AsyncSession = Depends(get_db)):
+    """All named price lists (Retail, Wholesale, VIP, …) for the current
+    workspace. Returns header rows only — call `/lists/{id}/items` for
+    per-product tier prices."""
     rows = (await db.execute(select(PriceList).order_by(PriceList.name))).scalars().all()
     return [{"id": str(r.id), "name": r.name, "currency": r.currency, "is_active": r.is_active} for r in rows]
 
@@ -47,6 +64,8 @@ async def list_price_lists(db: AsyncSession = Depends(get_db)):
 async def create_price_list(p: PriceListIn, request: Request,
                             current_user = Depends(get_current_user),
                             db: AsyncSession = Depends(get_db)):
+    """Create a new named price list scoped to the active workspace.
+    Currency stays fixed per list so tier-pricing math is unambiguous."""
     ws_id = await get_active_workspace_id(request, current_user, db)
     pl = PriceList(name=p.name, currency=p.currency, workspace_id=ws_id)
     db.add(pl); await db.commit(); await db.refresh(pl)
@@ -55,6 +74,8 @@ async def create_price_list(p: PriceListIn, request: Request,
 
 @router.get("/lists/{list_id}/items")
 async def list_price_list_items(list_id: UUID, db: AsyncSession = Depends(get_db)):
+    """All tier rows for a given price list, sorted by product then
+    min_quantity so consumers can render the tier ladder directly."""
     rows = (await db.execute(
         select(PriceListItem).where(PriceListItem.price_list_id == list_id)
         .order_by(PriceListItem.product_id, PriceListItem.min_quantity)
@@ -66,6 +87,10 @@ async def list_price_list_items(list_id: UUID, db: AsyncSession = Depends(get_db
 @router.post("/lists/{list_id}/items", status_code=201,
              dependencies=[Depends(require_permission("finance.pricing.manage"))])
 async def add_price_list_item(list_id: UUID, p: PriceListItemIn, db: AsyncSession = Depends(get_db)):
+    """Add (or update) a tier row for (price_list, product, min_quantity).
+    The unique index enforces that each tier exists only once; a matching
+    insert is treated as an update so consumers can idempotently POST the
+    same row."""
     pl = await db.get(PriceList, list_id)
     if not pl:
         raise HTTPException(404, "Price list not found")
@@ -100,6 +125,9 @@ class DiscountIn(BaseModel):
 
 @router.get("/discounts")
 async def list_discounts(db: AsyncSession = Depends(get_db)):
+    """All discount rules (coupons + auto-apply), newest first. Frontend
+    renders the rule catalog; the runtime picker lives in
+    `app.services.pricing.lookup_discount`."""
     rows = (await db.execute(select(DiscountRule).order_by(DiscountRule.created_at.desc()))).scalars().all()
     return [{
         "id": str(r.id), "name": r.name, "code": r.code,
@@ -116,6 +144,9 @@ async def list_discounts(db: AsyncSession = Depends(get_db)):
 async def create_discount(p: DiscountIn, request: Request,
                           current_user = Depends(get_current_user),
                           db: AsyncSession = Depends(get_db)):
+    """Create a coupon (when `code` is set) or auto-apply rule (when
+    `code` is null). Percent values above 100 are clamped by
+    `apply_discount` so miscounts can't flip the total sign."""
     ws_id = await get_active_workspace_id(request, current_user, db)
     r = DiscountRule(
         workspace_id=ws_id, name=p.name, code=p.code,
@@ -145,6 +176,9 @@ class CartQuoteIn(BaseModel):
 async def quote_cart(p: CartQuoteIn, request: Request,
                      current_user = Depends(get_current_user),
                      db: AsyncSession = Depends(get_db)):
+    """Preview cart subtotal / discount / total for a set of
+    (product_id, quantity) items, optionally against a named price list
+    and / or a coupon code. Read-only: no Quote or Invoice is persisted."""
     ws_id = await get_active_workspace_id(request, current_user, db)
     return await price_cart(
         db,
@@ -173,6 +207,9 @@ class ReturnCreateIn(BaseModel):
 
 @returns_router.get("")
 async def list_returns(invoice_id: UUID | None = None, db: AsyncSession = Depends(get_db)):
+    """Most recent RMAs (up to 200), optionally filtered by invoice.
+    Use this both for a global admin list and for a per-invoice sidebar
+    that shows outstanding returns."""
     q = select(ReturnMerchandise).order_by(ReturnMerchandise.created_at.desc()).limit(200)
     if invoice_id:
         q = q.where(ReturnMerchandise.invoice_id == invoice_id)
@@ -191,6 +228,10 @@ async def list_returns(invoice_id: UUID | None = None, db: AsyncSession = Depend
 async def create_return(p: ReturnCreateIn, request: Request,
                         current_user = Depends(get_current_user),
                         db: AsyncSession = Depends(get_db)):
+    """Create an RMA against an existing invoice. `refund_amount` is
+    computed from the provided lines so callers don't have to double-enter
+    it. Starts in `requested` status — admins advance it through
+    approved/received/refunded via PATCH."""
     inv = await db.get(Invoice, p.invoice_id)
     if not inv:
         raise HTTPException(404, "Invoice not found")
@@ -215,21 +256,23 @@ async def create_return(p: ReturnCreateIn, request: Request,
                       dependencies=[Depends(require_permission("finance.refund.manage"))])
 async def update_return_status(return_id: UUID, new_status: ReturnStatus,
                                db: AsyncSession = Depends(get_db)):
+    """Advance an RMA to `new_status`. Stamps `received_at` /
+    `refunded_at` on the corresponding transitions; does NOT create a
+    CreditNote or touch a payment gateway (those are separate modules)."""
     r = await db.get(ReturnMerchandise, return_id)
     if not r:
         raise HTTPException(404, "Return not found")
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     r.status = new_status
     if new_status == ReturnStatus.RECEIVED and not r.received_at:
         r.received_at = now
     if new_status == ReturnStatus.REFUNDED and not r.refunded_at:
         r.refunded_at = now
-        # Push the invoice toward a credited state — don't try to draw up a
-        # credit-note here; that's a separate workflow. Just flip status.
-        inv = await db.get(Invoice, r.invoice_id)
-        if inv and inv.status not in (InvoiceStatus.PAID, InvoiceStatus.CANCELLED):
-            # Leave payment accounting to the payment module. We just mark
-            # refunded-at so downstream reports can detect it.
-            pass
+        # NOTE: we intentionally do NOT create a CreditNote or trigger a
+        # payment-gateway refund here. Those belong to the accounting +
+        # Stripe webhook modules and run on their own schedules. We only
+        # stamp refunded_at so downstream aging/spend reports can pick it up.
+        # (If/when bi-directional CreditNote generation lands, hook it into
+        # `app.services.refunds` and call from here.)
     await db.commit()
     return {"id": str(r.id), "status": r.status.value}

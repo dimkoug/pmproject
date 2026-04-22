@@ -1,5 +1,22 @@
+"""FastAPI auth / authz dependency injection.
+
+Three kinds of caller are supported:
+
+  * Logged-in users via JWT bearer token → `get_current_user` resolves the
+    `User` row and verifies `is_active`. Used by most authenticated routes.
+  * Programmatic integrations via API key (`prefix.<secret>`) →
+    `require_api_key_scope(*scopes)` looks up `ApiKey`, verifies it's
+    active, checks every listed scope is granted, and updates
+    `last_used_at`. 401 on missing/invalid key, 403 on missing scope.
+  * Anonymous callers → no dependency here; each public endpoint declares
+    its own (or none).
+
+Permission-gated routes compose this module's deps with
+`app.acl.resolver.require_permission(...)` so authz is checked *after*
+authn succeeds.
+"""
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
@@ -19,6 +36,17 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    """Resolve the logged-in user from a JWT bearer token.
+
+    Raises 401 when:
+      * the token is missing / malformed / expired (decode_access_token returns None)
+      * the `sub` claim is missing or not a valid UUID
+      * the user row doesn't exist
+      * the user has been deactivated (`is_active=False`)
+
+    The DB round-trip is intentional — it's what lets admins revoke access
+    by flipping `is_active` without having to invalidate issued JWTs.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token",
@@ -73,7 +101,7 @@ def require_api_key_scope(*required: str):
         # Best-effort last-used bookkeeping; swallow on failure so a replica race
         # never rejects an otherwise-valid request.
         try:
-            key.last_used_at = datetime.utcnow()
+            key.last_used_at = datetime.now(timezone.utc)
             await db.commit()
         except Exception:
             await db.rollback()

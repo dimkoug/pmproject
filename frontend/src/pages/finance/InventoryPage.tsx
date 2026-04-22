@@ -9,6 +9,7 @@ import PageHeader from "../../shell/PageHeader";
 import DataTable from "../../shell/DataTable";
 import { useDrawerPeek } from "../../shell/DetailDrawer";
 import { promptForValues, notifyUser } from "../../shell/modalService";
+import BarcodeFifoPanel from "./BarcodeFifoPanel";
 
 type Warehouse = { id: string; code: string; name: string; is_active: boolean };
 type Product = { id: string; sku: string; name: string; unit_cost: number; unit_price: number; reorder_point: number };
@@ -83,6 +84,8 @@ export default function InventoryPage() {
   return (
     <div>
       <PageHeader title="Inventory" subtitle="Warehouses, products, stock levels, and reorder alerts." />
+
+      <BarcodeFifoPanel warehouses={warehouses as Warehouse[]} />
 
       <div style={{ marginBottom: "1rem" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>

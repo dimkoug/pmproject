@@ -1,7 +1,7 @@
 """Inventory barcode + FIFO + bins (Phase 3 #5)."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import AsyncClient
@@ -61,7 +61,7 @@ class TestFifoIssue:
                     product_id=UUID(prod["id"]),
                     warehouse_id=UUID(wh["id"]),
                     batch_code=code,
-                    mfg_date=datetime.utcnow() - timedelta(days=days_ago),
+                    mfg_date=datetime.now(timezone.utc) - timedelta(days=days_ago),
                     qty_received=qty, qty_on_hand=qty, cost_per_unit=cost,
                 ))
             await db.commit()

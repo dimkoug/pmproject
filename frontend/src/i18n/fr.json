@@ -50,5 +50,15 @@
     "dashboard": "Tableau de bord",
     "overview": "Aperçu",
     "reports": "Rapports"
+  },
+  "onboarding": {
+    "eyebrow": "Mise en route",
+    "title": "Bienvenue sur PM Project",
+    "skip": "Ignorer pour l'instant",
+    "back": "Retour",
+    "finish": "Terminer",
+    "markDone": "Marquer comme terminé et continuer",
+    "progress": "{{done}} sur {{total}} terminés",
+    "welcomeCopy": "Cette configuration rapide prend environ une minute. Vous pouvez ignorer n'importe quelle étape et y revenir depuis Paramètres → Mise en route."
   }
 }

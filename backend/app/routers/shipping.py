@@ -12,7 +12,7 @@ push updates without per-carrier code in this repo.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -150,7 +150,7 @@ async def update_shipment_status(shipment_id: UUID, p: ShipmentStatusUpdate, db:
     if p.delivered_date:
         s.delivered_date = datetime.fromisoformat(p.delivered_date)
     elif p.status == ShipmentStatus.DELIVERED and s.delivered_date is None:
-        s.delivered_date = datetime.utcnow()
+        s.delivered_date = datetime.now(timezone.utc)
     if p.notes:
         s.notes = p.notes
     await db.commit()
@@ -190,7 +190,7 @@ async def shipping_webhook(event: ShippingWebhookEvent, db: AsyncSession = Depen
     if event.delivered_date:
         s.delivered_date = datetime.fromisoformat(event.delivered_date)
     elif event.status == ShipmentStatus.DELIVERED and s.delivered_date is None:
-        s.delivered_date = datetime.utcnow()
+        s.delivered_date = datetime.now(timezone.utc)
     if event.notes:
         s.notes = event.notes
     await db.commit()

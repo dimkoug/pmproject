@@ -37,6 +37,8 @@ import FinanceDashboardPage from "./pages/finance/FinanceDashboardPage";
 import InvoicesPage from "./pages/finance/InvoicesPage";
 import ExpensesPage from "./pages/finance/ExpensesPage";
 import VendorsPage from "./pages/finance/VendorsPage";
+import PricingPage from "./pages/finance/PricingPage";
+import ReturnsPage from "./pages/finance/ReturnsPage";
 import PurchaseOrdersPage from "./pages/finance/PurchaseOrdersPage";
 import AssetsPage from "./pages/finance/AssetsPage";
 import AccountsPage from "./pages/finance/AccountsPage";
@@ -103,6 +105,7 @@ import LeavePage from "./pages/admin/LeavePage";
 import AttendancePage from "./pages/admin/AttendancePage";
 import SecurityPage from "./pages/admin/SecurityPage";
 import TrashPage from "./pages/admin/TrashPage";
+import EmailTemplatesPage from "./pages/admin/EmailTemplatesPage";
 import TimesheetsPage from "./pages/admin/TimesheetsPage";
 
 export default function App() {
@@ -177,6 +180,8 @@ export default function App() {
           <Route path="aging" element={<AgingPage />} />
           <Route path="expenses" element={<ExpensesPage />} />
           <Route path="vendors" element={<VendorsPage />} />
+          <Route path="pricing" element={<PricingPage />} />
+          <Route path="returns" element={<ReturnsPage />} />
           <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
           <Route path="requisitions" element={<RequisitionsPage />} />
           <Route path="goods-receipts" element={<GoodsReceiptsPage />} />
@@ -232,6 +237,7 @@ export default function App() {
           <Route path="hr/timesheets" element={<TimesheetsPage />} />
           <Route path="security" element={<SecurityPage />} />
           <Route path="trash" element={<TrashPage />} />
+          <Route path="email-templates" element={<EmailTemplatesPage />} />
         </Route>
       </Route>
 

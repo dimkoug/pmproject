@@ -3,7 +3,7 @@
 import hashlib
 import json
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -129,7 +129,7 @@ async def decide_approval(approval_id: UUID, p: ApprovalDecision, current_user: 
     a.status = ApprovalStatus(p.decision)
     a.note = p.note or a.note
     a.approver_id = current_user.id
-    a.decided_at = datetime.utcnow()
+    a.decided_at = datetime.now(timezone.utc)
     await _apply_decision_side_effects(a, db)
     await db.commit()
     return {"id": str(a.id), "status": a.status.value}
@@ -192,7 +192,7 @@ async def retry_delivery(delivery_id: UUID, db: AsyncSession = Depends(get_db)):
     d = await db.get(WebhookDelivery, delivery_id)
     if not d:
         raise HTTPException(404, "Not found")
-    d.next_attempt_at = datetime.utcnow()
+    d.next_attempt_at = datetime.now(timezone.utc)
     await db.commit()
     return {"requeued": True}
 
@@ -315,14 +315,14 @@ async def list_schedules(db: AsyncSession = Depends(get_db)):
 @router.post("/scheduled-reports", status_code=201, dependencies=[Depends(require_permission("admin.workspace.manage"))])
 async def create_schedule(p: ScheduledReportCreate, db: AsyncSession = Depends(get_db)):
     r = ScheduledReport(name=p.name, endpoint=p.endpoint, frequency=p.frequency, recipients=p.recipients,
-                        next_run=_next_run(p.frequency, datetime.utcnow()))
+                        next_run=_next_run(p.frequency, datetime.now(timezone.utc)))
     db.add(r); await db.commit(); await db.refresh(r)
     return {"id": str(r.id)}
 
 @router.post("/scheduled-reports/run", dependencies=[Depends(require_permission("admin.workspace.manage"))])
 async def run_due_reports(db: AsyncSession = Depends(get_db)):
     """Run all reports whose next_run <= now. Stores result in runs table, updates next_run."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     due = (await db.execute(select(ScheduledReport).where(ScheduledReport.is_active == True, ScheduledReport.next_run <= now))).scalars().all()
     ran = 0
     try:

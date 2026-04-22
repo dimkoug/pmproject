@@ -12,7 +12,7 @@ register the `(entity, Model)` tuple below.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -106,6 +106,6 @@ async def purge_row(entity: str, row_id: UUID, db: AsyncSession = Depends(get_db
 # existing DELETE endpoint. Other entities: model already has deleted_at via
 # ALTER, but their DELETE endpoints still hard-delete; refactoring them is
 # mechanical follow-up (flip `await db.delete(row)` to `row.deleted_at =
-# datetime.utcnow()`).
+# datetime.now(timezone.utc)`).
 
 _ = datetime  # keep import referenced

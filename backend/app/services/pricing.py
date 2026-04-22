@@ -9,7 +9,7 @@ rule against a subtotal, honouring percent vs amount + minimum subtotal.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,11 +36,23 @@ async def resolve_unit_price(db: AsyncSession, product, price_list_id, quantity:
     return product.unit_price or 0.0
 
 
+def _match_tz(ref: datetime, now: datetime) -> datetime:
+    """Coerce `now` to match `ref`'s tzinfo awareness. Postgres round-trips
+    aware datetimes through TIMESTAMPTZ columns, but SQLite (used in tests)
+    drops tzinfo — so service code that compares DB rows against a fresh
+    `datetime.now()` must normalize first, or it TypeErrors."""
+    if ref.tzinfo is None and now.tzinfo is not None:
+        return now.replace(tzinfo=None)
+    if ref.tzinfo is not None and now.tzinfo is None:
+        return now.replace(tzinfo=timezone.utc)
+    return now
+
+
 async def lookup_discount(db: AsyncSession, code: str | None, workspace_id=None) -> DiscountRule | None:
     """Find an active discount either by code, or (if code is None) the
     first auto-apply rule. Honours is_active + start/end window +
     redemption caps."""
-    now = datetime.utcnow()
+    now_aware = datetime.now(timezone.utc)
     q = select(DiscountRule).where(DiscountRule.is_active.is_(True))
     if workspace_id is not None:
         q = q.where((DiscountRule.workspace_id == workspace_id) | (DiscountRule.workspace_id.is_(None)))
@@ -50,9 +62,9 @@ async def lookup_discount(db: AsyncSession, code: str | None, workspace_id=None)
         q = q.where(DiscountRule.code.is_(None))
     rows = (await db.execute(q)).scalars().all()
     for r in rows:
-        if r.starts_at and r.starts_at > now:
+        if r.starts_at and r.starts_at > _match_tz(r.starts_at, now_aware):
             continue
-        if r.ends_at and r.ends_at < now:
+        if r.ends_at and r.ends_at < _match_tz(r.ends_at, now_aware):
             continue
         if r.max_redemptions is not None and r.redemptions >= r.max_redemptions:
             continue

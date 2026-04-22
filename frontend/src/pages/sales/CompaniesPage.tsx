@@ -120,6 +120,7 @@ export default function CompaniesPage() {
         emptyTitle="No companies yet"
         emptyDescription="Create your first company to track customers and prospects."
         onRowClick={(row) => openPeek("company", row.id)}
+        stateStorageKey="sales-companies"
       />
     </div>
   );

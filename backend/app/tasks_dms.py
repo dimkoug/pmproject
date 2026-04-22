@@ -6,7 +6,7 @@ We bridge by running an inner async coroutine with asyncio.run().
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, and_
 
@@ -24,14 +24,14 @@ async def _run_expiry_reminders(days_ahead: int) -> dict:
     from app.models.notification import Notification
     from app.models.user import User
 
-    cutoff = datetime.utcnow() + timedelta(days=days_ahead)
+    cutoff = datetime.now(timezone.utc) + timedelta(days=days_ahead)
     created = 0
     emailed = 0
     async with async_session() as db:
         q = select(Document).where(
             Document.expiry_date.is_not(None),
             Document.expiry_date <= cutoff,
-            Document.expiry_date >= datetime.utcnow(),
+            Document.expiry_date >= datetime.now(timezone.utc),
         )
         for doc in (await db.scalars(q)).all():
             if not doc.created_by_id:
@@ -44,14 +44,14 @@ async def _run_expiry_reminders(days_ahead: int) -> dict:
                     and_(
                         Notification.user_id == doc.created_by_id,
                         Notification.title == recent_title,
-                        Notification.created_at >= datetime.utcnow() - timedelta(hours=24),
+                        Notification.created_at >= datetime.now(timezone.utc) - timedelta(hours=24),
                     )
                 )
             )
             if existing:
                 continue
 
-            days_left = (doc.expiry_date - datetime.utcnow()).days
+            days_left = (doc.expiry_date - datetime.now(timezone.utc)).days
             db.add(Notification(
                 user_id=doc.created_by_id,
                 project_id=doc.project_id,
@@ -94,7 +94,7 @@ async def _run_retention() -> dict:
         policies = (await db.scalars(
             select(RetentionPolicy).where(RetentionPolicy.is_active == True)  # noqa: E712
         )).all()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         for pol in policies:
             cutoff = now - timedelta(days=pol.days_after)
             q = select(Document).where(Document.updated_at <= cutoff)

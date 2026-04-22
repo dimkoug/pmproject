@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -57,7 +57,7 @@ def _coerce(v: Any) -> Any:
 
 
 def _filename(domain: str) -> str:
-    ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     return f"{domain}-{ts}.csv"
 
 

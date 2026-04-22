@@ -102,6 +102,7 @@ export default function ExpensesPage() {
         emptyTitle="No expenses yet"
         emptyDescription="Log your first expense to start tracking project costs."
         onRowClick={(row) => openPeek("expense", row.id)}
+        stateStorageKey="finance-expenses"
       />
     </div>
   );

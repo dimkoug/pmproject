@@ -10,7 +10,7 @@ import io
 import json
 import logging
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -118,7 +118,7 @@ async def export_my_data(current_user: User = Depends(get_current_user), db: Asy
                 {
                     "user_id": str(current_user.id),
                     "email": current_user.email,
-                    "exported_at": datetime.utcnow().isoformat(),
+                    "exported_at": datetime.now(timezone.utc).isoformat(),
                     "tables": {label: len(rows) for label, rows in bundle.items()},
                 },
                 indent=2,

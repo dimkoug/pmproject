@@ -84,7 +84,9 @@ export const APPS: AppDef[] = [
         { to: "/finance/invoices", label: "Invoices" },
         { to: "/finance/recurring", label: "Recurring" },
         { to: "/finance/credit-notes", label: "Credit Notes" },
+        { to: "/finance/returns", label: "Returns (RMA)" },
         { to: "/finance/aging", label: "Aging" },
+        { to: "/finance/pricing", label: "Pricing" },
       ]},
       { title: "Payables", items: [
         { to: "/finance/expenses", label: "Expenses" },
@@ -159,6 +161,7 @@ export const APPS: AppDef[] = [
         { to: "/admin/security", label: "Security" },
         { to: "/admin/activity", label: "Activity Log" },
         { to: "/admin/trash", label: "Trash" },
+        { to: "/admin/email-templates", label: "Email templates" },
       ]},
       { title: "Access Control", items: [
         { to: "/admin/acl/groups", label: "Groups" },

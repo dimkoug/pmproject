@@ -9,7 +9,7 @@ Covers:
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import AsyncClient
@@ -69,7 +69,7 @@ class TestBackoffSchedule:
         indexed by the attempt count just completed. Each successive wait
         is strictly longer than the previous one."""
         from app.services.webhooks import _next_attempt_time
-        base = datetime.utcnow()
+        base = datetime.now(timezone.utc)
         waits = [(_next_attempt_time(n) - base).total_seconds() for n in (0, 1, 2, 3, 4)]
         # Strictly increasing
         assert all(b > a for a, b in zip(waits, waits[1:]))
@@ -114,7 +114,11 @@ class TestQueueDelivery:
         assert d.attempts == 1
         assert d.delivered_at is None
         assert d.next_attempt_at is not None  # scheduled for retry
-        assert d.next_attempt_at > datetime.utcnow()
+        # SQLite drops tzinfo on round-trip; compare against naive UTC-now.
+        now_ref = datetime.now(timezone.utc)
+        if d.next_attempt_at.tzinfo is None:
+            now_ref = now_ref.replace(tzinfo=None)
+        assert d.next_attempt_at > now_ref
 
 
 class TestRetrySweeper:
@@ -127,7 +131,7 @@ class TestRetrySweeper:
             db.add(w); await db.commit(); await db.refresh(w)
             db.add(WebhookDelivery(
                 webhook_id=w.id, event="e", payload="{}",
-                attempts=1, next_attempt_at=datetime.utcnow() + timedelta(hours=1),
+                attempts=1, next_attempt_at=datetime.now(timezone.utc) + timedelta(hours=1),
             ))
             await db.commit()
 
@@ -142,7 +146,7 @@ class TestRetrySweeper:
         async with async_session_test() as db:
             w = Webhook(name="due", url="http://127.0.0.1:1/x", secret="s", is_active=True)
             db.add(w); await db.commit(); await db.refresh(w)
-            past = datetime.utcnow() - timedelta(minutes=5)
+            past = datetime.now(timezone.utc) - timedelta(minutes=5)
             db.add(WebhookDelivery(
                 webhook_id=w.id, event="e.due", payload="{}",
                 attempts=1, next_attempt_at=past,
@@ -170,7 +174,7 @@ class TestRetrySweeper:
             db.add(w); await db.commit(); await db.refresh(w)
             db.add(WebhookDelivery(
                 webhook_id=w.id, event="e.max", payload="{}",
-                attempts=MAX_ATTEMPTS, next_attempt_at=datetime.utcnow() - timedelta(seconds=1),
+                attempts=MAX_ATTEMPTS, next_attempt_at=datetime.now(timezone.utc) - timedelta(seconds=1),
             ))
             await db.commit()
 

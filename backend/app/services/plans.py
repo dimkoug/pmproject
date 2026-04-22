@@ -31,6 +31,9 @@ PLANS: dict[str, PlanLimits] = {
 
 
 def _limits_for(plan: str) -> PlanLimits:
+    """Return the static `PlanLimits` for a named tier. Unknown plan names
+    fall back to `free` so a corrupt `workspaces.plan` value can't silently
+    bypass all caps."""
     return PLANS.get(plan, PLANS["free"])
 
 
@@ -50,6 +53,8 @@ async def get_effective_limits(db: AsyncSession, workspace_id) -> PlanLimits:
 
 
 async def _count_members(db: AsyncSession, workspace_id) -> int:
+    """Count active `WorkspaceMember` rows for this workspace. Counts every
+    membership regardless of role — a viewer still consumes a seat."""
     from app.models.cross import WorkspaceMember
     row = (await db.execute(
         select(func.count(WorkspaceMember.id)).where(WorkspaceMember.workspace_id == workspace_id)
@@ -58,6 +63,9 @@ async def _count_members(db: AsyncSession, workspace_id) -> int:
 
 
 async def _count_projects(db: AsyncSession, workspace_id) -> int:
+    """Count non-deleted Projects in this workspace. Soft-deleted rows
+    (deleted_at IS NOT NULL) are excluded so emptying Trash frees up
+    project quota without admin intervention."""
     from app.models.project import Project
     row = (await db.execute(
         select(func.count(Project.id))
@@ -82,6 +90,9 @@ async def _sum_storage_mb(db: AsyncSession, workspace_id) -> int:
 
 
 async def check_can_add_member(db: AsyncSession, workspace_id) -> None:
+    """Raise HTTP 402 (Payment Required) when the workspace is at its
+    user cap. Called before inserting a WorkspaceMember row so the cap is
+    enforced regardless of which router path added the member."""
     limits = await get_effective_limits(db, workspace_id)
     if await _count_members(db, workspace_id) >= limits.max_users:
         raise HTTPException(status_code=402, detail={
@@ -91,6 +102,10 @@ async def check_can_add_member(db: AsyncSession, workspace_id) -> None:
 
 
 async def check_can_add_project(db: AsyncSession, workspace_id) -> None:
+    """Raise HTTP 402 when the workspace is at its project cap. Counts
+    only non-soft-deleted projects, so restoring from Trash *may* push
+    the workspace over cap — restore is treated like a fresh create and
+    should re-check if this ever matters."""
     limits = await get_effective_limits(db, workspace_id)
     if await _count_projects(db, workspace_id) >= limits.max_projects:
         raise HTTPException(status_code=402, detail={
@@ -100,6 +115,10 @@ async def check_can_add_project(db: AsyncSession, workspace_id) -> None:
 
 
 async def check_can_upload(db: AsyncSession, workspace_id, new_bytes: int) -> None:
+    """Raise HTTP 402 when the incoming upload would push storage past
+    the cap. `new_bytes` is counted in MiB (ceil to 1) so sub-MiB uploads
+    still occupy space against the quota and a flood of tiny files can't
+    trivially bypass the cap."""
     limits = await get_effective_limits(db, workspace_id)
     current_mb = await _sum_storage_mb(db, workspace_id)
     incoming_mb = max(1, int(new_bytes / (1024 * 1024)))

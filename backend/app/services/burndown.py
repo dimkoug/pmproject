@@ -1,7 +1,7 @@
 """Burndown / Burnup chart data calculator."""
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 @dataclass
@@ -38,7 +38,7 @@ def compute_burndown(tasks: list[dict], project_start: str | None = None) -> dic
         return {"points": [], "total_points": total_points, "done_points": 0}
 
     start = min(all_dates)
-    end = max(all_dates + [datetime.utcnow().strftime("%Y-%m-%d")])
+    end = max(all_dates + [datetime.now(timezone.utc).strftime("%Y-%m-%d")])
 
     # Count completions per day
     completed_by_date: dict[str, int] = {}

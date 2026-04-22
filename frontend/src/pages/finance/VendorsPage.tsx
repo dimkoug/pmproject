@@ -65,6 +65,7 @@ export default function VendorsPage() {
         emptyTitle="No vendors yet"
         emptyDescription="Add your first vendor to start creating purchase orders."
         onRowClick={(row) => openPeek("vendor", row.id)}
+        stateStorageKey="finance-vendors"
       />
     </div>
   );

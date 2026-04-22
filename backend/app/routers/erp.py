@@ -1,6 +1,6 @@
 """ERP System: Accounts, Invoices, Expenses, Vendors, Purchase Orders, Assets, Budgets, Payments, Journal, FX, Bank Recon."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -303,7 +303,7 @@ async def create_expense(
     from datetime import datetime
     from app.services.workspaces import get_active_workspace_id
     ws_id = await get_active_workspace_id(request, current_user, db)
-    e = Expense(project_id=p.project_id, user_id=current_user.id, vendor_id=p.vendor_id, description=p.description, category=p.category, amount=p.amount, expense_date=datetime.fromisoformat(p.expense_date) if p.expense_date else datetime.utcnow(), receipt_ref=p.receipt_ref, workspace_id=ws_id)
+    e = Expense(project_id=p.project_id, user_id=current_user.id, vendor_id=p.vendor_id, description=p.description, category=p.category, amount=p.amount, expense_date=datetime.fromisoformat(p.expense_date) if p.expense_date else datetime.now(timezone.utc), receipt_ref=p.receipt_ref, workspace_id=ws_id)
     db.add(e); await db.commit(); await db.refresh(e)
     return {"id": str(e.id), "amount": e.amount}
 
@@ -509,7 +509,7 @@ async def list_fx_rates(db: AsyncSession = Depends(get_db)):
 @router.post("/fx-rates", status_code=201)
 async def create_fx_rate(p: FxRateCreate, db: AsyncSession = Depends(get_db)):
     r = FxRate(base_code=p.base_code.upper(), quote_code=p.quote_code.upper(), rate=p.rate,
-               rate_date=datetime.fromisoformat(p.rate_date) if p.rate_date else datetime.utcnow())
+               rate_date=datetime.fromisoformat(p.rate_date) if p.rate_date else datetime.now(timezone.utc))
     db.add(r); await db.commit(); await db.refresh(r)
     return {"id": str(r.id)}
 
@@ -539,7 +539,7 @@ async def create_payment(p: PaymentCreate, db: AsyncSession = Depends(get_db)):
     inv = await db.get(Invoice, p.invoice_id)
     if not inv: raise HTTPException(404, "Invoice not found")
     pay = Payment(invoice_id=p.invoice_id, amount=p.amount, method=p.method, reference=p.reference, notes=p.notes,
-                  payment_date=datetime.fromisoformat(p.payment_date) if p.payment_date else datetime.utcnow())
+                  payment_date=datetime.fromisoformat(p.payment_date) if p.payment_date else datetime.now(timezone.utc))
     db.add(pay)
     inv.paid_amount = round((inv.paid_amount or 0) + p.amount, 2)
     if inv.paid_amount >= inv.total:
@@ -549,7 +549,7 @@ async def create_payment(p: PaymentCreate, db: AsyncSession = Depends(get_db)):
 
 @router.get("/invoices/aging")
 async def invoice_aging(project_id: UUID | None = None, db: AsyncSession = Depends(get_db)):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     q = select(Invoice).where(Invoice.status.notin_([InvoiceStatus.PAID, InvoiceStatus.CANCELLED]))
     if project_id: q = q.where(Invoice.project_id == project_id)
     result = await db.execute(q)
@@ -592,7 +592,7 @@ async def create_recurring(p: RecurringInvoiceCreate, db: AsyncSession = Depends
     r = RecurringInvoice(project_id=p.project_id, vendor_id=p.vendor_id, template_name=p.template_name,
                          invoice_type=p.invoice_type, amount=p.amount, tax_rate=p.tax_rate, frequency=p.frequency,
                          description=p.description,
-                         next_run=datetime.fromisoformat(p.next_run) if p.next_run else datetime.utcnow())
+                         next_run=datetime.fromisoformat(p.next_run) if p.next_run else datetime.now(timezone.utc))
     db.add(r); await db.commit(); await db.refresh(r)
     return {"id": str(r.id)}
 
@@ -604,7 +604,7 @@ def _advance(dt: datetime, freq: RecurringFrequency) -> datetime:
 
 @router.post("/recurring-invoices/run")
 async def run_recurring(db: AsyncSession = Depends(get_db)):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     due = (await db.execute(select(RecurringInvoice).where(RecurringInvoice.is_active == True, RecurringInvoice.next_run <= now))).scalars().all()
     generated = []
     for r in due:
@@ -668,7 +668,7 @@ async def create_journal(p: JournalEntryCreate, db: AsyncSession = Depends(get_d
     if round(total_d, 2) != round(total_c, 2):
         raise HTTPException(400, f"Debits ({total_d}) must equal credits ({total_c})")
     je = JournalEntry(entry_number=p.entry_number, memo=p.memo,
-                     entry_date=datetime.fromisoformat(p.entry_date) if p.entry_date else datetime.utcnow())
+                     entry_date=datetime.fromisoformat(p.entry_date) if p.entry_date else datetime.now(timezone.utc))
     db.add(je); await db.flush()
     for l in p.lines:
         db.add(JournalLine(
@@ -750,7 +750,7 @@ async def list_bank_txns(
 @router.post("/bank-transactions", status_code=201, dependencies=[Depends(require_permission("finance.bank.manage"))])
 async def create_bank_txn(p: BankTxnCreate, db: AsyncSession = Depends(get_db)):
     t = BankTransaction(account_id=p.account_id, description=p.description, amount=p.amount, reference=p.reference,
-                        txn_date=datetime.fromisoformat(p.txn_date) if p.txn_date else datetime.utcnow())
+                        txn_date=datetime.fromisoformat(p.txn_date) if p.txn_date else datetime.now(timezone.utc))
     db.add(t); await db.commit(); await db.refresh(t)
     return _bank_txn_dict(t)
 
@@ -888,8 +888,13 @@ async def create_bin(p: BinIn, db: AsyncSession = Depends(get_db)):
 
 # ── Barcode lookup (#5) ────────────────────────────────────────────
 
-@router.get("/products/by-barcode/{code}")
+@router.get("/products/by-barcode/{code}",
+            dependencies=[Depends(require_permission("finance.inventory.manage"))])
 async def product_by_barcode(code: str, db: AsyncSession = Depends(get_db)):
+    """Resolve a scanned barcode to a product record. Gated behind
+    `finance.inventory.manage` because the response body leaks `unit_cost`
+    — which is sensitive pricing info that shouldn't be readable by every
+    authenticated user."""
     from app.services.inventory import scan_barcode
     p = await scan_barcode(db, code)
     if not p:
@@ -990,7 +995,7 @@ async def create_dep(p: DepScheduleCreate, db: AsyncSession = Depends(get_db)):
 
 @router.post("/depreciation/run")
 async def run_depreciation(as_of: str | None = None, db: AsyncSession = Depends(get_db)):
-    now = datetime.fromisoformat(as_of) if as_of else datetime.utcnow()
+    now = datetime.fromisoformat(as_of) if as_of else datetime.now(timezone.utc)
     schedules = (await db.execute(select(DepreciationSchedule))).scalars().all()
     posted = 0
     total = 0.0
@@ -1090,7 +1095,7 @@ async def balance_sheet(db: AsyncSession = Depends(get_db)):
 
 @router.get("/reports/cash-flow")
 async def cash_flow(days: int = 90, db: AsyncSession = Depends(get_db)):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     horizon = now + timedelta(days=days)
     # Inflows: unpaid receivable invoices due in window
     inv_q = select(Invoice).where(Invoice.invoice_type == InvoiceType.RECEIVABLE,
@@ -1523,7 +1528,7 @@ async def create_grn(p: GrnCreate, current_user=Depends(get_current_user), db: A
         grn_number=p.grn_number,
         po_id=p.po_id,
         warehouse_id=p.warehouse_id,
-        received_date=datetime.fromisoformat(p.received_date) if p.received_date else datetime.utcnow(),
+        received_date=datetime.fromisoformat(p.received_date) if p.received_date else datetime.now(timezone.utc),
         received_by_user_id=current_user.id,
         notes=p.notes,
     )
@@ -1679,7 +1684,7 @@ async def send_rfq(rfq_id: UUID, db: AsyncSession = Depends(get_db)):
         raise HTTPException(404, "RFQ not found")
     if r.status != RfqStatus.DRAFT:
         raise HTTPException(400, f"RFQ is {r.status.value}, cannot send")
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     vendors_q = await db.execute(select(RfqVendor).where(RfqVendor.rfq_id == r.id, RfqVendor.sent_at.is_(None)))
     for v in vendors_q.scalars().all():
         v.sent_at = now
@@ -1776,7 +1781,7 @@ async def submit_supplier_quote(rfq_id: UUID, p: SupplierQuoteCreate, db: AsyncS
     vendor_link_q = await db.execute(select(RfqVendor).where(RfqVendor.rfq_id == r.id, RfqVendor.vendor_id == p.vendor_id))
     vendor_link = vendor_link_q.scalar_one_or_none()
     if vendor_link:
-        vendor_link.responded_at = datetime.utcnow()
+        vendor_link.responded_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(sq)
     return {"id": str(sq.id), "total": sq.total}
@@ -1895,7 +1900,7 @@ async def list_batches(
     if warehouse_id:
         q = q.where(StockBatch.warehouse_id == warehouse_id)
     if expiring_within_days is not None and expiring_within_days >= 0:
-        cutoff = datetime.utcnow() + timedelta(days=expiring_within_days)
+        cutoff = datetime.now(timezone.utc) + timedelta(days=expiring_within_days)
         q = q.where(StockBatch.expiry_date.is_not(None), StockBatch.expiry_date <= cutoff, StockBatch.qty_on_hand > 0)
     result = await db.execute(q)
     return [_batch_dict(b) for b in result.scalars().all()]
@@ -1903,7 +1908,7 @@ async def list_batches(
 
 @router.get("/batches/expiring-soon")
 async def batches_expiring_soon(within_days: int = Query(30, ge=0, le=365), db: AsyncSession = Depends(get_db)):
-    cutoff = datetime.utcnow() + timedelta(days=within_days)
+    cutoff = datetime.now(timezone.utc) + timedelta(days=within_days)
     q = select(StockBatch).where(
         StockBatch.expiry_date.is_not(None),
         StockBatch.expiry_date <= cutoff,
@@ -2042,7 +2047,7 @@ async def create_serial(p: SerialCreate, db: AsyncSession = Depends(get_db)):
         serial_no=p.serial_no,
         batch_id=p.batch_id,
         current_warehouse_id=p.current_warehouse_id,
-        received_date=datetime.fromisoformat(p.received_date) if p.received_date else datetime.utcnow(),
+        received_date=datetime.fromisoformat(p.received_date) if p.received_date else datetime.now(timezone.utc),
         notes=p.notes,
     )
     db.add(s)

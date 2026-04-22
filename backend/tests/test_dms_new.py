@@ -3,7 +3,7 @@ audit logging, version restore, expiry, share links, advanced search, reports.
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import AsyncClient
@@ -66,8 +66,8 @@ class TestRestoreVersion:
 
 class TestExpiry:
     async def test_expiring_endpoint_lists_soon_to_expire(self, client: AsyncClient):
-        soon = (datetime.utcnow() + timedelta(days=3)).isoformat()
-        far = (datetime.utcnow() + timedelta(days=90)).isoformat()
+        soon = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+        far = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
         await _upload(client, "ExpSoon", expiry=soon)
         await _upload(client, "ExpFar", expiry=far)
         await _upload(client, "NoExp")
@@ -81,7 +81,7 @@ class TestExpiry:
 
     async def test_patch_sets_expiry(self, client: AsyncClient):
         doc = await _upload(client, "ExpMutable")
-        expiry = (datetime.utcnow() + timedelta(days=10)).isoformat()
+        expiry = (datetime.now(timezone.utc) + timedelta(days=10)).isoformat()
         r = await client.patch(f"/api/dms/documents/{doc['id']}?expiry_date={expiry}")
         assert r.status_code == 200
         r = await client.get("/api/dms/documents/expiring?days=14")
@@ -171,7 +171,7 @@ class TestShareLinks:
         # Manually expire the link in the DB
         async with async_session_test() as s:
             link = (await s.scalars(select(DocumentShareLink).where(DocumentShareLink.token == token))).first()
-            link.expires_at = datetime.utcnow() - timedelta(hours=1)
+            link.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
             await s.commit()
 
         r = await client.get(f"/api/dms/share/{token}")

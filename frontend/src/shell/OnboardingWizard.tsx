@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Icon } from "./icons";
 import { useOnboarding } from "./useOnboarding";
 
@@ -15,6 +16,7 @@ import { useOnboarding } from "./useOnboarding";
  * so the wizard isn't trying to duplicate settings UI.
  */
 export default function OnboardingWizard() {
+  const { t } = useTranslation();
   const { status, completeStep, skip } = useOnboarding();
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
 
@@ -43,11 +45,11 @@ export default function OnboardingWizard() {
       <div className="onboarding-card">
         <header className="onboarding-head">
           <div>
-            <div className="onboarding-eyebrow">Getting started</div>
-            <h2 id="onboarding-title" className="onboarding-title">Welcome to PM Project</h2>
+            <div className="onboarding-eyebrow">{t("onboarding.eyebrow")}</div>
+            <h2 id="onboarding-title" className="onboarding-title">{t("onboarding.title")}</h2>
           </div>
-          <button className="btn btn-sm" onClick={skip} aria-label="Skip setup">
-            Skip for now
+          <button className="btn btn-sm" onClick={skip} aria-label={t("onboarding.skip")}>
+            {t("onboarding.skip")}
           </button>
         </header>
 
@@ -86,18 +88,18 @@ export default function OnboardingWizard() {
             <div className="onboarding-actions">
               {current > 0 && (
                 <button className="btn" onClick={() => setActiveIdx(current - 1)}>
-                  Back
+                  {t("onboarding.back")}
                 </button>
               )}
               <button className="btn btn-primary" onClick={advance}>
-                {current === status.steps.length - 1 ? "Finish" : "Mark done & continue"}
+                {current === status.steps.length - 1 ? t("onboarding.finish") : t("onboarding.markDone")}
               </button>
             </div>
           </div>
         </div>
 
         <footer className="onboarding-foot">
-          <span>{done.size} of {status.steps.length} complete</span>
+          <span>{t("onboarding.progress", { done: done.size, total: status.steps.length })}</span>
           <div className="onboarding-progress">
             <div
               className="onboarding-progress-bar"
@@ -115,14 +117,10 @@ export default function OnboardingWizard() {
  * page. The backend auto-detects workspace/project completion when the user
  * gets to them via these links, so we don't need to POST a step explicitly. */
 function StepContent({ stepKey }: { stepKey: string }) {
+  const { t } = useTranslation();
   switch (stepKey) {
     case "welcome":
-      return (
-        <p className="onboarding-copy">
-          This quick setup takes about a minute. You can skip any step and come
-          back to it from Settings → Getting started.
-        </p>
-      );
+      return <p className="onboarding-copy">{t("onboarding.welcomeCopy")}</p>;
     case "profile":
       return (
         <div className="onboarding-copy">
@@ -160,6 +158,12 @@ function StepContent({ stepKey }: { stepKey: string }) {
         </div>
       );
     default:
-      return null;
+      // A step declared in the backend STEPS list but not handled here would
+      // render an empty pane and confuse the user. Fail loud in dev; in prod
+      // fall back to the step's own description so the wizard doesn't freeze.
+      if (import.meta.env.DEV) {
+        throw new Error(`OnboardingWizard: unknown step key "${stepKey}". Add a case in StepContent.`);
+      }
+      return <p className="onboarding-copy">Continue when ready.</p>;
   }
 }

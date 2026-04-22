@@ -92,6 +92,7 @@ export default function PurchaseOrdersPage() {
         emptyTitle="No purchase orders yet"
         emptyDescription="Create your first PO to start tracking committed spend."
         onRowClick={(row) => openPeek("purchase-order", row.id)}
+        stateStorageKey="finance-purchase-orders"
       />
     </div>
   );

@@ -9,7 +9,7 @@ Covers:
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from httpx import AsyncClient
@@ -96,8 +96,8 @@ class TestLookupDiscount:
             db.add(DiscountRule(
                 name="Summer", code="SUMMER",
                 discount_type=DiscountType.PERCENT, value=20,
-                starts_at=datetime.utcnow() - timedelta(days=60),
-                ends_at=datetime.utcnow() - timedelta(days=30),  # expired
+                starts_at=datetime.now(timezone.utc) - timedelta(days=60),
+                ends_at=datetime.now(timezone.utc) - timedelta(days=30),  # expired
             ))
             await db.commit()
             rule = await lookup_discount(db, "SUMMER")

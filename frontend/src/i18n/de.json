@@ -50,5 +50,15 @@
     "dashboard": "Dashboard",
     "overview": "Übersicht",
     "reports": "Berichte"
+  },
+  "onboarding": {
+    "eyebrow": "Erste Schritte",
+    "title": "Willkommen bei PM Project",
+    "skip": "Vorerst überspringen",
+    "back": "Zurück",
+    "finish": "Fertig",
+    "markDone": "Als erledigt markieren & weiter",
+    "progress": "{{done}} von {{total}} abgeschlossen",
+    "welcomeCopy": "Diese kurze Einrichtung dauert etwa eine Minute. Du kannst jeden Schritt überspringen und später in Einstellungen → Erste Schritte darauf zurückkommen."
   }
 }

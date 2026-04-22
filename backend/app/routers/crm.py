@@ -1,6 +1,6 @@
 """CRM System: Companies, Contacts, Leads, Opportunities, Interactions, Quotes, Campaigns."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -319,7 +319,7 @@ async def complete_follow_up(interaction_id: UUID, db: AsyncSession = Depends(ge
 
 @router.get("/follow-ups/due")
 async def follow_ups_due(db: AsyncSession = Depends(get_db)):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     result = await db.execute(select(Interaction).where(Interaction.follow_up_date.isnot(None), Interaction.follow_up_done == False, Interaction.follow_up_date <= now).order_by(Interaction.follow_up_date))
     return [{"id": str(i.id), "subject": i.subject, "contact_id": str(i.contact_id) if i.contact_id else None, "follow_up_date": i.follow_up_date.isoformat()[:10] if i.follow_up_date else None} for i in result.scalars().all()]
 
@@ -471,7 +471,7 @@ async def ingest_email(p: EmailIngest, db: AsyncSession = Depends(get_db)):
     if c: contact_id = c.id
     e = EmailMessage(external_id=p.external_id, thread_id=p.thread_id, direction=p.direction,
                      from_email=p.from_email, to_email=p.to_email, subject=p.subject, body=p.body,
-                     sent_at=datetime.fromisoformat(p.sent_at) if p.sent_at else datetime.utcnow(),
+                     sent_at=datetime.fromisoformat(p.sent_at) if p.sent_at else datetime.now(timezone.utc),
                      contact_id=contact_id)
     db.add(e); await db.commit(); await db.refresh(e)
     return {"id": str(e.id), "linked_contact": str(contact_id) if contact_id else None}
@@ -522,7 +522,7 @@ async def contract_metrics(db: AsyncSession = Depends(get_db)):
     renewals_30 = (await db.execute(select(Contract).where(
         Contract.status == ContractStatus.ACTIVE,
         Contract.end_date.isnot(None),
-        Contract.end_date <= datetime.utcnow() + timedelta(days=30),
+        Contract.end_date <= datetime.now(timezone.utc) + timedelta(days=30),
     ))).scalars().all()
     churned = (await db.execute(select(func.count(Contract.id)).where(Contract.status == ContractStatus.CHURNED))).scalar() or 0
     return {"active_count": len(active), "mrr": round(mrr, 2), "arr": round(arr, 2),
@@ -677,14 +677,14 @@ async def enroll_drip(p: DripEnrollIn, db: AsyncSession = Depends(get_db)):
     steps = (await db.execute(select(DripStep).where(DripStep.sequence_id == p.sequence_id).order_by(DripStep.step_order))).scalars().all()
     if not steps: raise HTTPException(400, "Sequence has no steps")
     en = DripEnrollment(sequence_id=p.sequence_id, contact_id=p.contact_id, current_step=0,
-                        next_step_at=datetime.utcnow() + timedelta(days=steps[0].delay_days))
+                        next_step_at=datetime.now(timezone.utc) + timedelta(days=steps[0].delay_days))
     db.add(en); await db.commit(); await db.refresh(en)
     return {"id": str(en.id)}
 
 @router.post("/drips/tick")
 async def drip_tick(db: AsyncSession = Depends(get_db)):
     """Advance all enrollments whose next_step_at has passed. Logs EmailMessage + Interaction."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     due = (await db.execute(select(DripEnrollment).where(DripEnrollment.is_active == True, DripEnrollment.next_step_at <= now))).scalars().all()
     sent = 0
     for en in due:
@@ -712,7 +712,7 @@ async def drip_tick(db: AsyncSession = Depends(get_db)):
 async def compute_health(db: AsyncSession = Depends(get_db)):
     """Compute health snapshot for every company."""
     companies = (await db.execute(select(Company))).scalars().all()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     created = 0
     for co in companies:
         score = 50; factors = []

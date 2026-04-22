@@ -4,6 +4,7 @@
 // None of these entities currently have a detail endpoint, so each body
 // pulls the matching record out of its list query client-side.
 
+import { useEffect, useState } from "react";
 import {
   useGetInvoicesQuery,
   useGetOpportunitiesQuery,
@@ -16,6 +17,7 @@ import {
   useGetEmployeesQuery,
   useGetLeaveRequestsQuery,
 } from "../services/api";
+import { useAppSelector } from "../app/hooks";
 import type { DrawerBody, DrawerContext } from "./DetailDrawer";
 import { registerDrawerBody } from "./DetailDrawer";
 import { CommentsTab, OverviewGrid } from "./drawerTabs";
@@ -234,10 +236,54 @@ function VendorTitle({ ctx }: { ctx: DrawerContext }) {
   return <>{v?.name ?? fallbackTitle("Vendor", ctx.id)}</>;
 }
 
+
+/**
+ * Vendor performance KPIs — on-time delivery, defect rate, average days
+ * late, total spend. Backed by GET /api/erp/vendors/{id}/performance,
+ * which aggregates across the vendor's PurchaseOrder history.
+ */
+function VendorPerformance({ ctx }: { ctx: DrawerContext }) {
+  const token = useAppSelector((s) => s.auth.token);
+  const [data, setData] = useState<any>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!token) return;
+    (async () => {
+      try {
+        const r = await fetch(`${(import.meta.env.VITE_API_URL as string) || ""}/api/erp/vendors/${ctx.id}/performance`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!r.ok) { setErr(`HTTP ${r.status}`); return; }
+        setData(await r.json());
+      } catch (e: any) {
+        setErr(e?.message || "Network error");
+      }
+    })();
+  }, [ctx.id, token]);
+
+  if (err) return <div style={{ color: "var(--danger)" }}>Failed to load: {err}</div>;
+  if (!data) return <div style={{ color: "var(--gray-500)" }}>Loading…</div>;
+
+  const pct = (x: number | null) => (x == null ? "—" : `${(x * 100).toFixed(1)}%`);
+  return (
+    <OverviewGrid
+      rows={[
+        { label: "POs total", value: String(data.po_count) },
+        { label: "POs received", value: String(data.received_count) },
+        { label: "On-time rate", value: pct(data.on_time_rate) },
+        { label: "Avg days late", value: `${data.avg_days_late} day${data.avg_days_late === 1 ? "" : "s"}` },
+        { label: "Defect rate", value: pct(data.defect_rate) },
+        { label: "Total spend", value: `$${(data.total_spend || 0).toLocaleString()}` },
+      ]}
+    />
+  );
+}
+
 const vendorBody: DrawerBody = {
   title: (ctx) => <VendorTitle ctx={ctx} />,
   tabs: {
     overview: (ctx) => <VendorOverview ctx={ctx} />,
+    performance: (ctx) => <VendorPerformance ctx={ctx} />,
     comments: (ctx) => <CommentsTab targetType="vendor" targetId={ctx.id} />,
   },
   defaultTab: "overview",

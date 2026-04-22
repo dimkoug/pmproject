@@ -124,6 +124,7 @@ export default function LeadsPage() {
         emptyTitle="No leads yet"
         emptyDescription="Capture your first lead to start qualifying prospects."
         onRowClick={(row) => openPeek("lead", row.id)}
+        stateStorageKey="sales-leads"
       />
     </div>
   );

@@ -11,7 +11,7 @@ in lockstep without a round-trip for catalog.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -99,7 +99,7 @@ async def complete_step(key: str, user: User = Depends(get_current_user), db: As
     # When every step is ticked, mark the whole wizard as finished so we stop
     # showing it on subsequent logins.
     if done >= _STEP_KEYS:
-        row.completed_at = datetime.utcnow()
+        row.completed_at = datetime.now(timezone.utc)
     await db.commit()
     return await _status_payload(db, user, row)
 
@@ -107,7 +107,7 @@ async def complete_step(key: str, user: User = Depends(get_current_user), db: As
 @router.post("/skip")
 async def skip_wizard(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     row = await _get_or_create(db, user.id)
-    row.skipped_at = datetime.utcnow()
+    row.skipped_at = datetime.now(timezone.utc)
     await db.commit()
     return {"skipped": True}
 

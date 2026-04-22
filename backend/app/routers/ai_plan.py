@@ -12,7 +12,7 @@ saving (or just discard).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -122,7 +122,7 @@ async def commit_ai_plan(
         raise HTTPException(403, "Need projects.task.create on this project")
 
     created: dict[str, int] = {"tasks": 0, "risks": 0, "deliverables": 0, "milestones": 0}
-    base_date = project.start_date or datetime.utcnow()
+    base_date = project.start_date or datetime.now(timezone.utc)
 
     # Tasks
     for t in p.tasks:

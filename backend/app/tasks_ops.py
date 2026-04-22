@@ -12,7 +12,7 @@ import logging
 import os
 import shutil
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.celery_app import celery
@@ -31,7 +31,7 @@ def purge_old_audit_task(self):
     async def _run():
         from sqlalchemy import text
         from app.database import engine
-        cutoff = datetime.utcnow() - timedelta(days=settings.audit_retention_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=settings.audit_retention_days)
         async with engine.begin() as conn:
             r = await conn.execute(
                 text("DELETE FROM audit_entries WHERE created_at < :c"),
@@ -71,7 +71,7 @@ def pg_backup_task(self):
     try:
         Path(settings.backup_dir).mkdir(parents=True, exist_ok=True)
         cfg = _parse_db_url(settings.database_url)
-        stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         out_path = Path(settings.backup_dir) / f"{cfg['db']}-{stamp}.sql.gz"
         env = {**os.environ, "PGPASSWORD": cfg["password"]}
         # Use custom format + gzip; drop large indexes during restore if you want
@@ -132,12 +132,12 @@ def purge_old_backups_task(self):
         root = Path(settings.backup_dir)
         if not root.exists():
             return {"deleted": 0, "note": "backup dir does not exist"}
-        cutoff = datetime.utcnow() - timedelta(days=settings.backup_retention_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=settings.backup_retention_days)
         deleted = 0
         total_bytes = 0
         for p in root.glob("*.sql.gz"):
             try:
-                if datetime.utcfromtimestamp(p.stat().st_mtime) < cutoff:
+                if datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc) < cutoff:
                     total_bytes += p.stat().st_size
                     p.unlink()
                     deleted += 1

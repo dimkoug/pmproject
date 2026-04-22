@@ -4,7 +4,7 @@ import os
 import re
 import secrets
 import uuid as uuid_mod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
@@ -391,7 +391,7 @@ async def expiring_documents(
     db: AsyncSession = Depends(get_db),
 ):
     """Docs with an expiry_date within `days` days from now."""
-    cutoff = datetime.utcnow() + timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) + timedelta(days=days)
     q = select(Document).where(
         Document.expiry_date.is_not(None),
         Document.expiry_date <= cutoff,
@@ -516,7 +516,7 @@ async def sign_document(token: str, p: SignaturePayload, db: AsyncSession = Depe
     if sig.status != SignatureRequestStatus.PENDING: raise HTTPException(400, f"Request is {sig.status.value}")
     sig.status = SignatureRequestStatus.SIGNED
     sig.signature_data = p.signature_data
-    sig.signed_at = datetime.utcnow()
+    sig.signed_at = datetime.now(timezone.utc)
     await db.commit()
     return {"id": str(sig.id), "status": sig.status.value}
 
@@ -622,7 +622,7 @@ async def create_policy(p: RetentionPolicyCreate, db: AsyncSession = Depends(get
 async def apply_retention(db: AsyncSession = Depends(get_db)):
     policies = (await db.execute(select(RetentionPolicy).where(RetentionPolicy.is_active == True))).scalars().all()
     archived = deleted = 0
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     for pol in policies:
         cutoff = now - timedelta(days=pol.days_after)
         q = select(Document).where(Document.updated_at < cutoff)
@@ -811,7 +811,7 @@ async def advance_workflow(wf_id: UUID, p: WorkflowAdvance, current_user: User =
     step = steps[w.current_step]
     step.status = WorkflowStepStatus(p.decision)
     step.note = p.note
-    step.decided_at = datetime.utcnow()
+    step.decided_at = datetime.now(timezone.utc)
     if p.decision == "rejected":
         w.is_complete = True
         d = await db.get(Document, w.document_id)
@@ -900,7 +900,7 @@ async def esign_webhook(provider_id: UUID, p: ESignWebhookPayload, db: AsyncSess
         ).order_by(SignatureRequest.created_at.desc()).limit(1))).scalar_one_or_none()
         if req:
             req.status = SignatureRequestStatus.SIGNED
-            req.signed_at = datetime.fromisoformat(p.signed_at) if p.signed_at else datetime.utcnow()
+            req.signed_at = datetime.fromisoformat(p.signed_at) if p.signed_at else datetime.now(timezone.utc)
             await db.commit()
             return {"matched": str(req.id), "status": "signed"}
     return {"received": True, "event": p.event}
@@ -954,7 +954,7 @@ async def create_share_link(doc_id: UUID, p: ShareLinkCreate, current_user: User
     token = secrets.token_urlsafe(32)
     expires_at = None
     if p.expires_in_days and p.expires_in_days > 0:
-        expires_at = datetime.utcnow() + timedelta(days=p.expires_in_days)
+        expires_at = datetime.now(timezone.utc) + timedelta(days=p.expires_in_days)
     link = DocumentShareLink(document_id=doc_id, token=token, expires_at=expires_at, created_by_id=current_user.id)
     db.add(link)
     await log_audit(db, current_user, domain="dms", action="share_link_created", entity_type="document", entity_id=doc.id,
@@ -988,7 +988,7 @@ async def report_usage(days: int = Query(30, ge=1, le=365), db: AsyncSession = D
     """Top downloaders and most-accessed documents over the given window,
     sourced from the global audit log."""
     from app.models.cross import AuditEntry
-    since = datetime.utcnow() - timedelta(days=days)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
     base = select(AuditEntry).where(
         AuditEntry.domain == "dms",
         AuditEntry.action.in_(["download", "view"]),

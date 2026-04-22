@@ -138,6 +138,7 @@ export default function InvoicesPage() {
         emptyTitle="No invoices yet"
         emptyDescription="Create your first invoice to start invoicing customers."
         onRowClick={(row) => openPeek("invoice", row.id)}
+        stateStorageKey="finance-invoices"
       />
     </div>
   );

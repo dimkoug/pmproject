@@ -98,7 +98,7 @@ async def update_me_settings(
 from pydantic import BaseModel as _BM
 import hashlib as _hashlib
 import secrets as _secrets
-from datetime import timedelta as _td
+from datetime import timedelta as _td, timezone
 
 
 class ForgotPasswordIn(_BM):
@@ -132,7 +132,7 @@ async def forgot_password(payload: ForgotPasswordIn, db: AsyncSession = Depends(
     if user and user.is_active:
         raw = _secrets.token_urlsafe(32)
         token_hash = _hash_token(raw)
-        expires = datetime.utcnow() + _td(hours=1)
+        expires = datetime.now(timezone.utc) + _td(hours=1)
         db.add(PasswordResetToken(user_id=user.id, token_hash=token_hash, expires_at=expires))
         await db.commit()
         reset_url = f"{_settings.app_base_url.rstrip('/')}/reset-password#token={raw}"
@@ -161,7 +161,7 @@ async def reset_password(payload: ResetPasswordIn, db: AsyncSession = Depends(ge
         raise HTTPException(400, "Invalid or expired token")
     if row.used_at is not None:
         raise HTTPException(400, "This reset link has already been used")
-    if row.expires_at < datetime.utcnow():
+    if row.expires_at < datetime.now(timezone.utc):
         raise HTTPException(400, "This reset link has expired")
     if len(payload.new_password) < 8:
         raise HTTPException(400, "Password must be at least 8 characters")
@@ -169,7 +169,7 @@ async def reset_password(payload: ResetPasswordIn, db: AsyncSession = Depends(ge
     if not user or not user.is_active:
         raise HTTPException(400, "Account not available")
     user.hashed_password = hash_password(payload.new_password)
-    row.used_at = datetime.utcnow()
+    row.used_at = datetime.now(timezone.utc)
     await db.commit()
     return {"ok": True}
 

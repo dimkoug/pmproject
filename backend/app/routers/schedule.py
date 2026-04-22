@@ -121,14 +121,12 @@ async def create_dependency(
                    f"'{succ.title}' already depends (directly or indirectly) on '{pred.title}' through other tasks.",
         )
 
-    # 6. Lag validation
+    # 6. Lag validation. Negative lag (aka "lead time") is allowed on every
+    # dependency type — it just means the successor starts before the
+    # predecessor finishes (standard MS Project semantics). We only reject
+    # leads that are longer than the predecessor's own duration, because a
+    # successor can't legitimately start before its predecessor exists.
     if payload.lag_days < 0:
-        dep_type = payload.dependency_type
-        if dep_type in (DependencyType.FS, DependencyType.SS):
-            # Negative lag (lead) on FS/SS: predecessor hasn't finished but successor starts
-            # This is valid in MS Project - it's a lead time
-            pass
-        # Negative lag is allowed (it means lead time) but warn if too large
         pred_dur = pred.duration_days or pred.most_likely_duration or 0
         if pred_dur and abs(payload.lag_days) > pred_dur:
             raise HTTPException(

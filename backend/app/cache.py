@@ -45,6 +45,8 @@ async def get_ws_redis() -> aioredis.Redis:
 
 
 async def close_redis() -> None:
+    """Tear down both Redis connection pools. Called from lifespan on app
+    shutdown so sockets close cleanly before the process exits."""
     global _cache_pool, _ws_pool
     if _cache_pool is not None:
         await _cache_pool.aclose()

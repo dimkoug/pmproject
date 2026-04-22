@@ -10,6 +10,7 @@ import {
   useGetWorkspacesQuery, useCreateWorkspaceMutation,
 } from "../services/api";
 import { promptForValues, confirmAction, notifyUser } from "../shell/modalService";
+import WorkspaceUsageCard from "../shell/WorkspaceUsageCard";
 
 const ADMIN_TABS = ["approvals", "webhooks", "api-keys", "audit", "schedules", "dashboards", "sso", "workspaces"] as const;
 
@@ -372,12 +373,13 @@ export default function AdminPage() {
               rWs();
             }}>+ New</button>
           </div>
-          <table><thead><tr><th>Name</th><th>Slug</th><th>Plan</th><th>Owner</th></tr></thead><tbody>
+          <table><thead><tr><th>Name</th><th>Slug</th><th>Plan</th><th>Owner</th><th style={{ minWidth: 220 }}>Usage</th></tr></thead><tbody>
             {workspaces.map((w: any) => <tr key={w.id}>
               <td style={{ fontWeight: 500 }}>{w.name}</td>
               <td style={{ fontFamily: "monospace" }}>{w.slug}</td>
               <td><span className="badge badge-blue">{w.plan}</span></td>
               <td style={{ fontSize: "0.75rem" }}>{w.owner_id ? w.owner_id.slice(0, 8) + "…" : "-"}</td>
+              <td><WorkspaceUsageCard workspaceId={w.id} compact /></td>
             </tr>)}
           </tbody></table>
         </div>

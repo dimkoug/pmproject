@@ -23,7 +23,7 @@ import hashlib
 import hmac
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import select
@@ -69,7 +69,7 @@ def _next_attempt_time(attempts: int) -> datetime | None:
     Returns None if we've exhausted retries."""
     if attempts >= MAX_ATTEMPTS:
         return None
-    return datetime.utcnow() + timedelta(seconds=_BACKOFF_SCHEDULE[attempts])
+    return datetime.now(timezone.utc) + timedelta(seconds=_BACKOFF_SCHEDULE[attempts])
 
 
 async def queue_delivery(hook_id: str, event: str, payload_json: str) -> str | None:
@@ -91,7 +91,7 @@ async def queue_delivery(hook_id: str, event: str, payload_json: str) -> str | N
         delivery.status_code = status
         delivery.error = err
         if status is not None and 200 <= status < 300:
-            delivery.delivered_at = datetime.utcnow()
+            delivery.delivered_at = datetime.now(timezone.utc)
             delivery.next_attempt_at = None
         else:
             delivery.next_attempt_at = _next_attempt_time(1)
@@ -100,8 +100,10 @@ async def queue_delivery(hook_id: str, event: str, payload_json: str) -> str | N
 
 
 async def retry_pending_deliveries(batch_size: int = 50) -> dict:
-    """Sweep for deliveries whose retry time has come due, attempt each once."""
-    now = datetime.utcnow()
+    """Sweep for deliveries whose retry time has come due, attempt each once.
+    Uses a naive-UTC `now` for the WHERE clause because SQLite-backed tests
+    store naive datetimes; Postgres silently coerces either into TIMESTAMPTZ."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     sent = 0
     failed = 0
     exhausted = 0
@@ -126,7 +128,7 @@ async def retry_pending_deliveries(batch_size: int = 50) -> dict:
             d.status_code = status
             d.error = err
             if status is not None and 200 <= status < 300:
-                d.delivered_at = datetime.utcnow()
+                d.delivered_at = datetime.now(timezone.utc)
                 d.next_attempt_at = None
                 sent += 1
             else:

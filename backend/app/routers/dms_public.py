@@ -1,6 +1,6 @@
 """Public DMS endpoints — no auth required. Only serves valid share-link tokens."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import FileResponse
@@ -20,7 +20,7 @@ async def public_download(token: str, db: AsyncSession = Depends(get_db)):
     link = (await db.scalars(select(DocumentShareLink).where(DocumentShareLink.token == token))).first()
     if not link or link.is_revoked:
         raise HTTPException(404, "Link not found")
-    if link.expires_at and link.expires_at < datetime.utcnow():
+    if link.expires_at and link.expires_at < datetime.now(timezone.utc):
         raise HTTPException(410, "Link expired")
 
     doc = await db.get(Document, link.document_id)
