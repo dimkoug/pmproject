@@ -41,6 +41,9 @@ CATALOG: list[PermissionSpec] = [
     PermissionSpec("sales.opportunity.view",      "View opportunities",  "",                                                   "sales"),
     PermissionSpec("sales.opportunity.manage",    "Manage opportunities","Create / update opportunities and stages",           "sales"),
     PermissionSpec("sales.quote.manage",          "Manage quotes",       "Create quotes, convert to invoices",                 "sales"),
+    PermissionSpec("sales.order.view",             "View sales orders",   "",                                                   "sales"),
+    PermissionSpec("sales.order.manage",           "Manage sales orders", "Create / confirm / fulfill / invoice SOs",           "sales"),
+    PermissionSpec("sales.shipment.manage",        "Manage shipments",    "Attach tracking numbers, update delivery status",     "sales"),
     PermissionSpec("sales.contract.manage",       "Manage contracts",    "Create / update / close contracts",                  "sales"),
     PermissionSpec("sales.campaign.manage",       "Manage campaigns",    "Run marketing campaigns",                            "sales"),
     PermissionSpec("sales.commission.manage",     "Manage commissions",  "Configure rules and pay commissions",                "sales"),
@@ -56,11 +59,15 @@ CATALOG: list[PermissionSpec] = [
     PermissionSpec("finance.vendor.manage",       "Manage vendors",      "",                                                   "finance"),
     PermissionSpec("finance.po.manage",           "Manage purchase orders","Create and update POs",                            "finance"),
     PermissionSpec("finance.requisition.manage",  "Manage requisitions", "Submit, approve, convert to POs",                    "finance"),
+    PermissionSpec("finance.grn.manage",           "Manage goods receipts","Record receipts against POs, write stock movements", "finance"),
+    PermissionSpec("finance.rfq.manage",           "Manage RFQs",         "Run vendor RFQs, compare quotes, award to PO",       "finance"),
     PermissionSpec("finance.asset.manage",        "Manage assets",       "",                                                   "finance"),
     PermissionSpec("finance.account.manage",      "Manage chart of accts","Configure accounts",                                "finance"),
     PermissionSpec("finance.journal.post",        "Post journal entries","Create and post journal entries",                    "finance"),
     PermissionSpec("finance.bank.manage",         "Manage bank txns",    "Ingest / match bank transactions",                   "finance"),
     PermissionSpec("finance.inventory.manage",    "Manage inventory",    "Warehouses, products, stock movements",              "finance"),
+    PermissionSpec("inventory.batch.manage",       "Manage batches / lots","Create batches, adjust expiry and qty",             "finance"),
+    PermissionSpec("inventory.serial.manage",      "Manage serial numbers","Register and transition serials",                   "finance"),
     PermissionSpec("finance.budget.manage",       "Manage budgets",      "",                                                   "finance"),
     PermissionSpec("finance.reports.view",        "View financial reports","P&L, Balance Sheet, Cash Flow, Tax",               "finance"),
 
@@ -84,6 +91,24 @@ CATALOG: list[PermissionSpec] = [
     PermissionSpec("admin.audit.view",            "View audit log",      "",                                                   "admin"),
     PermissionSpec("admin.sso.manage",            "Manage SSO",          "",                                                   "admin"),
     PermissionSpec("admin.workspace.manage",      "Manage workspaces",   "",                                                   "admin"),
+    PermissionSpec("admin.tag.manage",             "Manage tags catalog", "Create / rename / delete tags and attach anywhere",  "admin"),
+    PermissionSpec("admin.automation.manage",      "Manage automation",   "Create / edit / delete IFTTT-style automation rules", "admin"),
+    PermissionSpec("admin.field_mask.manage",      "Manage field masks",  "Configure which fields are masked for non-privileged users", "admin"),
+    PermissionSpec("admin.email.manage",           "Manage email templates", "Edit transactional templates + view tracking stats",  "admin"),
+    PermissionSpec("acl.unmask.finance_sensitive", "See finance-sensitive fields", "Reveal company revenue, employee salary, contact phone for non-finance users", "admin"),
+    PermissionSpec("finance.pricing.manage",       "Manage pricing",      "Price lists + coupons / discount rules",            "finance"),
+    PermissionSpec("finance.refund.manage",        "Manage refunds",      "Create + process return/refund (RMA) records",      "finance"),
+
+    # ── HR ──────────────────────────────────────────────────────────
+    PermissionSpec("hr.employee.view",             "View employees",      "Browse the employee directory",                      "admin"),
+    PermissionSpec("hr.employee.manage",           "Manage employees",    "Create / update / terminate employee records",       "admin"),
+    PermissionSpec("hr.leave.view",                "View leave requests", "See team / company leave queue",                     "admin"),
+    PermissionSpec("hr.leave.request",             "Submit leave",        "Submit own leave requests",                          "admin"),
+    PermissionSpec("hr.leave.approve",             "Approve leave",       "Approve / reject leave requests",                    "admin"),
+    PermissionSpec("hr.attendance.view",           "View attendance",     "See team attendance records",                        "admin"),
+    PermissionSpec("hr.attendance.manage",         "Manage attendance",   "Edit attendance records, import bulk timesheets",    "admin"),
+    PermissionSpec("hr.timesheet.submit",          "Submit own timesheet","Submit weekly timesheet for approval",                "admin"),
+    PermissionSpec("hr.timesheet.approve",         "Approve timesheets",  "Approve / reject submitted weekly timesheets",        "admin"),
 ]
 
 
@@ -106,6 +131,6 @@ DEFAULT_GROUPS: list[GroupSpec] = [
     ("Members",         "Day-to-day contributors on projects.",          ["projects.project.view", "projects.task.view", "projects.task.create", "projects.task.update", "projects.risk.manage", "projects.deliverable.manage", "projects.reports.view", "documents.folder.view", "documents.file.upload", "documents.file.download"]),
     ("Viewers",         "Read-only across projects.",                    ["projects.project.view", "projects.task.view", "projects.reports.view", "sales.opportunity.view", "sales.lead.view", "finance.invoice.view", "finance.expense.view", "finance.reports.view", "documents.folder.view", "documents.file.download"]),
     ("Sales",           "Full CRM + read-only finance.",                 _prefix("sales.") + ["finance.invoice.view", "finance.reports.view", "projects.project.view"]),
-    ("Finance",         "Full ERP + read-only projects.",                _prefix("finance.") + ["projects.project.view", "projects.reports.view"]),
+    ("Finance",         "Full ERP + read-only projects.",                _prefix("finance.") + ["projects.project.view", "projects.reports.view", "acl.unmask.finance_sensitive"]),
     ("Operations",      "Warehouse, inventory, assets, POs.",            ["finance.inventory.manage", "finance.asset.manage", "finance.vendor.manage", "finance.po.manage", "finance.requisition.manage", "documents.folder.view", "documents.file.upload", "documents.file.download"]),
 ]

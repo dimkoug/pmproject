@@ -128,3 +128,16 @@ def import_csv_task(self, csv_text: str, project_id: str):
     except Exception as exc:
         logger.exception("CSV import task failed")
         raise self.retry(exc=exc, countdown=5)
+
+
+# ─── AI project-plan generation (#52) ─────────────────────────────
+
+@celery.task(name="generate_project_plan_task", bind=True, max_retries=1, queue="reports")
+def generate_project_plan_task(self, brief: str):
+    """Run on the reports queue — LLM calls can take 30+ seconds."""
+    from app.services.llm import generate_project_plan
+    try:
+        return generate_project_plan(brief)
+    except Exception as exc:
+        logger.exception("AI plan generation failed")
+        raise self.retry(exc=exc, countdown=10)

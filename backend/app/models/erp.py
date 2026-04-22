@@ -39,6 +39,7 @@ class Vendor(Base):
     __tablename__ = "erp_vendors"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     contact_person: Mapped[str | None] = mapped_column(String(255))
     email: Mapped[str | None] = mapped_column(String(255))
@@ -74,8 +75,10 @@ class Invoice(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id"))
     project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"))
     vendor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_vendors.id"))
+    company_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("crm_companies.id"))
     invoice_number: Mapped[str] = mapped_column(String(50), nullable=False)
     invoice_type: Mapped[InvoiceType] = mapped_column(Enum(InvoiceType), default=InvoiceType.RECEIVABLE)
     status: Mapped[InvoiceStatus] = mapped_column(Enum(InvoiceStatus), default=InvoiceStatus.DRAFT)
@@ -89,6 +92,9 @@ class Invoice(Base):
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     fx_rate: Mapped[float] = mapped_column(Float, default=1.0)
     notes: Mapped[str | None] = mapped_column(Text)
+    stripe_session_id: Mapped[str | None] = mapped_column(String(120))
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(120))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -125,6 +131,7 @@ class Expense(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id"))
     project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"))
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     vendor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_vendors.id"))
@@ -158,6 +165,7 @@ class PurchaseOrder(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id"))
     project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"))
     vendor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_vendors.id"), nullable=False)
     po_number: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -166,7 +174,25 @@ class PurchaseOrder(Base):
     total_amount: Mapped[float] = mapped_column(Float, default=0.0)
     order_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     delivery_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Vendor performance tracking (#4) — set by the GRN / receiving flow.
+    received_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 0..1: fraction of received lines flagged defective by QC.
+    defect_rate: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PurchaseOrderLine(Base):
+    __tablename__ = "erp_purchase_order_lines"
+    __table_args__ = (Index("ix_erp_po_lines_po", "po_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    po_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_purchase_orders.id", ondelete="CASCADE"), nullable=False)
+    product_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_products.id"))
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, default=1.0)
+    unit_price: Mapped[float] = mapped_column(Float, default=0.0)
+    quantity_received: Mapped[float] = mapped_column(Float, default=0.0)
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
 
 
 # ── Assets ──────────────────────────────────────────────────────────
@@ -183,6 +209,7 @@ class Asset(Base):
     __table_args__ = (Index("ix_erp_assets_project", "project_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id"))
     project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     asset_tag: Mapped[str | None] = mapped_column(String(50))
@@ -313,6 +340,32 @@ class JournalLine(Base):
     debit: Mapped[float] = mapped_column(Float, default=0.0)
     credit: Mapped[float] = mapped_column(Float, default=0.0)
     description: Mapped[str | None] = mapped_column(String(500))
+    cost_center_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_cost_centers.id"))
+    profit_center_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_profit_centers.id"))
+
+
+class CostCenter(Base):
+    __tablename__ = "erp_cost_centers"
+    __table_args__ = (Index("ix_erp_cc_code", "code", unique=True),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProfitCenter(Base):
+    __tablename__ = "erp_profit_centers"
+    __table_args__ = (Index("ix_erp_pc_code", "code", unique=True),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 # ── Bank Reconciliation ─────────────────────────────────────────────
@@ -329,7 +382,9 @@ class BankTransaction(Base):
     reference: Mapped[str | None] = mapped_column(String(255))
     matched_invoice_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_invoices.id"))
     matched_expense_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_expenses.id"))
+    matched_journal_entry_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_journal_entries.id"))
     is_reconciled: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -348,16 +403,41 @@ class Warehouse(Base):
 
 class Product(Base):
     __tablename__ = "erp_products"
-    __table_args__ = (Index("ix_erp_products_sku", "sku", unique=True),)
+    __table_args__ = (
+        Index("ix_erp_products_sku", "sku", unique=True),
+        Index("ix_erp_products_barcode", "barcode", unique=True),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     sku: Mapped[str] = mapped_column(String(50), nullable=False)
+    # Scanner-friendly barcode (EAN-13 / UPC-A / Code128). Unique so scans
+    # resolve to exactly one product — pair with a lookup endpoint.
+    barcode: Mapped[str | None] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     unit_cost: Mapped[float] = mapped_column(Float, default=0.0)
     unit_price: Mapped[float] = mapped_column(Float, default=0.0)
     reorder_point: Mapped[int] = mapped_column(Integer, default=0)
     reorder_qty: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    track_batch: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    track_serial: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WarehouseBin(Base):
+    """Physical bin/location inside a warehouse (e.g. "A-12-03"). A
+    StockMovement can record which bin material went to or came from so
+    pickers know where to look without re-surveying the warehouse."""
+    __tablename__ = "erp_warehouse_bins"
+    __table_args__ = (
+        Index("ix_erp_bins_wh_code", "warehouse_id", "code", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    warehouse_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_warehouses.id", ondelete="CASCADE"), nullable=False)
+    code: Mapped[str] = mapped_column(String(40), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -379,11 +459,14 @@ class StockMovement(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     product_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_products.id"), nullable=False)
     warehouse_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_warehouses.id"), nullable=False)
+    bin_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_warehouse_bins.id"))
     movement_type: Mapped[MovementType] = mapped_column(Enum(MovementType), nullable=False)
     quantity: Mapped[float] = mapped_column(Float, nullable=False)
     unit_cost: Mapped[float | None] = mapped_column(Float)
     reference: Mapped[str | None] = mapped_column(String(255))
     notes: Mapped[str | None] = mapped_column(Text)
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_stock_batches.id"))
+    serial_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_stock_serials.id"))
     movement_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -461,3 +544,279 @@ class RequisitionItem(Base):
     description: Mapped[str] = mapped_column(String(500), nullable=False)
     quantity: Mapped[float] = mapped_column(Float, default=1.0)
     unit_price: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+# ── Sales Orders (Quote → SO → Invoice) ─────────────────────────────
+
+class SalesOrderStatus(str, enum.Enum):
+    DRAFT = "draft"
+    CONFIRMED = "confirmed"
+    FULFILLED = "fulfilled"
+    INVOICED = "invoiced"
+    CANCELLED = "cancelled"
+
+
+class SalesOrder(Base):
+    __tablename__ = "erp_sales_orders"
+    __table_args__ = (
+        Index("ix_erp_so_number", "order_number", unique=True),
+        Index("ix_erp_so_company", "company_id"),
+        Index("ix_erp_so_status", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    order_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("crm_quotes.id"))
+    company_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("crm_companies.id"))
+    opportunity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("crm_opportunities.id"))
+    project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"))
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_invoices.id"))
+    status: Mapped[SalesOrderStatus] = mapped_column(Enum(SalesOrderStatus), default=SalesOrderStatus.DRAFT)
+    order_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    delivery_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    subtotal: Mapped[float] = mapped_column(Float, default=0.0)
+    tax_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    tax_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    total: Mapped[float] = mapped_column(Float, default=0.0)
+    currency: Mapped[str] = mapped_column(String(3), default="USD")
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SalesOrderLine(Base):
+    __tablename__ = "erp_sales_order_lines"
+    __table_args__ = (Index("ix_erp_so_lines_order", "order_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_sales_orders.id", ondelete="CASCADE"), nullable=False)
+    product_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_products.id"))
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, default=1.0)
+    unit_price: Mapped[float] = mapped_column(Float, default=0.0)
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+# ── Goods Receipt Notes (GRN) ───────────────────────────────────────
+
+class GrnStatus(str, enum.Enum):
+    DRAFT = "draft"
+    CONFIRMED = "confirmed"
+    CANCELLED = "cancelled"
+
+
+class GoodsReceipt(Base):
+    __tablename__ = "erp_goods_receipts"
+    __table_args__ = (
+        Index("ix_erp_grn_po", "po_id"),
+        Index("ix_erp_grn_number", "grn_number", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    grn_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    po_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_purchase_orders.id"), nullable=False)
+    warehouse_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_warehouses.id"))
+    received_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    status: Mapped[GrnStatus] = mapped_column(Enum(GrnStatus), default=GrnStatus.DRAFT)
+    received_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GrnLine(Base):
+    __tablename__ = "erp_grn_lines"
+    __table_args__ = (Index("ix_erp_grn_lines_grn", "grn_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    grn_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_goods_receipts.id", ondelete="CASCADE"), nullable=False)
+    po_line_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_purchase_order_lines.id"))
+    product_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_products.id"))
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity_received: Mapped[float] = mapped_column(Float, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+# ── RFQs / Supplier Quotes ──────────────────────────────────────────
+
+class RfqStatus(str, enum.Enum):
+    DRAFT = "draft"
+    SENT = "sent"
+    CLOSED = "closed"
+    AWARDED = "awarded"
+    CANCELLED = "cancelled"
+
+
+class Rfq(Base):
+    __tablename__ = "erp_rfqs"
+    __table_args__ = (
+        Index("ix_erp_rfqs_number", "rfq_number", unique=True),
+        Index("ix_erp_rfqs_req", "requisition_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    rfq_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    requisition_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_requisitions.id"))
+    project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"))
+    status: Mapped[RfqStatus] = mapped_column(Enum(RfqStatus), default=RfqStatus.DRAFT)
+    issued_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    response_due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    awarded_quote_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    awarded_po_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_purchase_orders.id"))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RfqLine(Base):
+    __tablename__ = "erp_rfq_lines"
+    __table_args__ = (Index("ix_erp_rfq_lines_rfq", "rfq_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    rfq_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_rfqs.id", ondelete="CASCADE"), nullable=False)
+    product_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_products.id"))
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, default=1.0)
+    target_price: Mapped[float | None] = mapped_column(Float)
+
+
+class RfqVendor(Base):
+    __tablename__ = "erp_rfq_vendors"
+    __table_args__ = (Index("ix_erp_rfq_vendors_rfq", "rfq_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    rfq_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_rfqs.id", ondelete="CASCADE"), nullable=False)
+    vendor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_vendors.id"), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SupplierQuoteStatus(str, enum.Enum):
+    PENDING = "pending"
+    SUBMITTED = "submitted"
+    WON = "won"
+    LOST = "lost"
+
+
+class SupplierQuote(Base):
+    __tablename__ = "erp_supplier_quotes"
+    __table_args__ = (
+        Index("ix_erp_sq_rfq", "rfq_id"),
+        Index("ix_erp_sq_vendor", "vendor_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    rfq_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_rfqs.id", ondelete="CASCADE"), nullable=False)
+    vendor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_vendors.id"), nullable=False)
+    status: Mapped[SupplierQuoteStatus] = mapped_column(Enum(SupplierQuoteStatus), default=SupplierQuoteStatus.SUBMITTED)
+    total: Mapped[float] = mapped_column(Float, default=0.0)
+    currency: Mapped[str] = mapped_column(String(3), default="USD")
+    lead_time_days: Mapped[int | None] = mapped_column(Integer)
+    terms: Mapped[str | None] = mapped_column(Text)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SupplierQuoteLine(Base):
+    __tablename__ = "erp_supplier_quote_lines"
+    __table_args__ = (Index("ix_erp_sql_quote", "supplier_quote_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    supplier_quote_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_supplier_quotes.id", ondelete="CASCADE"), nullable=False)
+    rfq_line_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_rfq_lines.id"), nullable=False)
+    unit_price: Mapped[float] = mapped_column(Float, default=0.0)
+    lead_time_days: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+# ── Shipments (#75) ─────────────────────────────────────────────────
+
+class CarrierType(str, enum.Enum):
+    FEDEX = "fedex"
+    UPS = "ups"
+    DHL = "dhl"
+    USPS = "usps"
+    DPD = "dpd"
+    OTHER = "other"
+
+
+class ShipmentStatus(str, enum.Enum):
+    PENDING = "pending"
+    LABEL_CREATED = "label_created"
+    IN_TRANSIT = "in_transit"
+    DELIVERED = "delivered"
+    EXCEPTION = "exception"
+    CANCELLED = "cancelled"
+
+
+class Shipment(Base):
+    """A shipment ties a tracking number from a carrier to a Sales Order or Invoice."""
+
+    __tablename__ = "erp_shipments"
+    __table_args__ = (
+        Index("ix_erp_shipments_so", "sales_order_id"),
+        Index("ix_erp_shipments_invoice", "invoice_id"),
+        Index("ix_erp_shipments_carrier_tn", "carrier", "tracking_number", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sales_order_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_sales_orders.id"))
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_invoices.id"))
+    carrier: Mapped[CarrierType] = mapped_column(Enum(CarrierType), nullable=False)
+    tracking_number: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[ShipmentStatus] = mapped_column(Enum(ShipmentStatus), default=ShipmentStatus.PENDING, nullable=False)
+    shipped_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expected_delivery: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    label_url: Mapped[str | None] = mapped_column(String(500))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Batches / Lots (for products with track_batch=true) ─────────────
+
+class StockBatch(Base):
+    __tablename__ = "erp_stock_batches"
+    __table_args__ = (
+        Index("ix_erp_batches_product", "product_id"),
+        Index("ix_erp_batches_expiry", "expiry_date"),
+        Index("ix_erp_batches_code", "product_id", "batch_code", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_products.id"), nullable=False)
+    warehouse_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_warehouses.id"))
+    batch_code: Mapped[str] = mapped_column(String(100), nullable=False)
+    mfg_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expiry_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    qty_received: Mapped[float] = mapped_column(Float, default=0.0)
+    qty_on_hand: Mapped[float] = mapped_column(Float, default=0.0)
+    cost_per_unit: Mapped[float | None] = mapped_column(Float)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Serial numbers (for products with track_serial=true) ────────────
+
+class SerialStatus(str, enum.Enum):
+    IN_STOCK = "in_stock"
+    SOLD = "sold"
+    IN_TRANSIT = "in_transit"
+    SCRAPPED = "scrapped"
+    RETURNED = "returned"
+
+
+class StockSerial(Base):
+    __tablename__ = "erp_stock_serials"
+    __table_args__ = (
+        Index("ix_erp_serials_product", "product_id"),
+        Index("ix_erp_serials_status", "status"),
+        Index("ix_erp_serials_no", "product_id", "serial_no", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    product_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_products.id"), nullable=False)
+    serial_no: Mapped[str] = mapped_column(String(120), nullable=False)
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_stock_batches.id"))
+    current_warehouse_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("erp_warehouses.id"))
+    status: Mapped[SerialStatus] = mapped_column(Enum(SerialStatus), default=SerialStatus.IN_STOCK)
+    received_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

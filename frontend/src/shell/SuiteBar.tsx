@@ -1,16 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAppDispatch, useAppSelector } from "../app/hooks";
-import { logout } from "../services/authSlice";
+import { logout, patchUser } from "../services/authSlice";
 import {
   useSearchQuery, useGetNotificationsQuery, useGetUnreadCountQuery,
   useMarkNotificationReadMutation, useMarkAllReadMutation,
+  useUpdateMeSettingsMutation, useGetMyWorkspacesQuery, apiSlice,
 } from "../services/api";
 import AppSwitcher from "./AppSwitcher";
 import { getAppByPath } from "./navConfig";
 import { Icon } from "./icons";
 import { useHotkeys } from "./useHotkeys";
 import ShortcutsCheatsheet from "./ShortcutsCheatsheet";
+import { SUPPORTED_LANGUAGES, setLanguage } from "../i18n";
+import { COMMON_TIMEZONES } from "../i18n/format";
+import { useFormat } from "../i18n/format";
 
 export default function SuiteBar() {
   const location = useLocation();
@@ -30,6 +35,16 @@ export default function SuiteBar() {
   const userRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const { t, i18n } = useTranslation();
+  const { formatDateTime } = useFormat();
+  const [updateSettings] = useUpdateMeSettingsMutation();
+  const { data: workspaces = [] } = useGetMyWorkspacesQuery();
+  const activeWorkspace = (workspaces as any[]).find((w) => w.active);
+  const switchWorkspace = (id: string) => {
+    localStorage.setItem("activeWorkspaceId", id);
+    // Drop all RTK Query caches so every list re-fetches with the new workspace scope.
+    dispatch(apiSlice.util.resetApiState());
+  };
 
   useHotkeys([
     {
@@ -81,6 +96,26 @@ export default function SuiteBar() {
   }, [density]);
 
   useEffect(() => {
+    if (user?.language && user.language !== i18n.language) {
+      void i18n.changeLanguage(user.language);
+    }
+  }, [user?.language, i18n]);
+
+  const changeLanguage = async (code: string) => {
+    setLanguage(code);
+    if (user) {
+      const r: any = await updateSettings({ language: code });
+      if (!r.error) dispatch(patchUser({ language: code }));
+    }
+  };
+
+  const changeTimezone = async (tz: string) => {
+    if (!user) return;
+    const r: any = await updateSettings({ timezone: tz });
+    if (!r.error) dispatch(patchUser({ timezone: tz }));
+  };
+
+  useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (userRef.current && !userRef.current.contains(e.target as Node)) setUserOpen(false);
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
@@ -128,7 +163,7 @@ export default function SuiteBar() {
             onChange={(e) => setSearchQ(e.target.value)}
             onFocus={() => setSearchFocus(true)}
             onBlur={() => setTimeout(() => setSearchFocus(false), 150)}
-            placeholder={`Search${projectId ? " this project" : " everywhere"}…  (Ctrl+K)`}
+            placeholder={`${projectId ? t("shell.searchThisProject") : t("shell.searchEverywhere")}  (Ctrl+K)`}
           />
           {searchFocus && searchQ.length >= 2 && searchResults.length > 0 && (
             <div className="suite-search-panel">
@@ -144,15 +179,15 @@ export default function SuiteBar() {
       </div>
 
       <div className="suite-bar-right">
-        <span className={`suite-ws ${wsConnected ? "on" : "off"}`} title={wsConnected ? "Live" : "Reconnecting…"}>
+        <span className={`suite-ws ${wsConnected ? "on" : "off"}`} title={wsConnected ? t("shell.live") : "Reconnecting…"}>
           <span className="suite-ws-dot" />
-          <span className="suite-ws-label">{wsConnected ? "Live" : "Offline"}</span>
+          <span className="suite-ws-label">{wsConnected ? t("shell.live") : t("shell.offline")}</span>
         </span>
         <div className="suite-notif" ref={notifRef}>
           <button
             className="suite-icon-btn"
-            title="Notifications"
-            aria-label={`Notifications (${unreadCount} unread)`}
+            title={t("shell.notifications")}
+            aria-label={`${t("shell.notifications")} (${unreadCount} unread)`}
             onClick={() => setNotifOpen((x) => !x)}
           >
             <Icon.Bell aria-hidden />
@@ -161,16 +196,16 @@ export default function SuiteBar() {
           {notifOpen && (
             <div className="suite-notif-panel" role="menu">
               <div className="suite-notif-head">
-                <span>Notifications</span>
+                <span>{t("shell.notifications")}</span>
                 {notifications.some((n: any) => !n.is_read) && (
                   <button
                     className="btn btn-sm"
                     onClick={async () => { await markAll(); refetchCount(); refetchNotifs(); }}
-                  >Mark all read</button>
+                  >{t("shell.markAllRead")}</button>
                 )}
               </div>
               {notifications.length === 0 ? (
-                <div className="suite-notif-empty">You're all caught up.</div>
+                <div className="suite-notif-empty">{t("shell.noNotifications")}</div>
               ) : (
                 <div className="suite-notif-list">
                   {notifications.map((n: any) => (
@@ -186,7 +221,7 @@ export default function SuiteBar() {
                       <div className="suite-notif-body">
                         <div className="suite-notif-title">{n.title}</div>
                         {n.body && <div className="suite-notif-snippet">{n.body}</div>}
-                        <div className="suite-notif-time">{new Date(n.created_at).toLocaleString()}</div>
+                        <div className="suite-notif-time">{formatDateTime(n.created_at)}</div>
                       </div>
                     </button>
                   ))}
@@ -195,7 +230,7 @@ export default function SuiteBar() {
             </div>
           )}
         </div>
-        <button className="suite-icon-btn" title={darkMode ? "Light mode" : "Dark mode"} onClick={() => setDarkMode(!darkMode)}>
+        <button className="suite-icon-btn" title={darkMode ? t("shell.lightMode") : t("shell.darkMode")} onClick={() => setDarkMode(!darkMode)}>
           {darkMode ? <Icon.Sun aria-hidden /> : <Icon.Moon aria-hidden />}
         </button>
         <div className="suite-user" ref={userRef}>
@@ -211,10 +246,24 @@ export default function SuiteBar() {
                   <div className="suite-user-email">{user?.email}</div>
                 </div>
               </div>
-              <button className="suite-user-item" onClick={() => { setUserOpen(false); navigate("/admin"); }}>Workspace settings</button>
-              <button className="suite-user-item" onClick={() => { setUserOpen(false); setCheatsheetOpen(true); }}>Keyboard shortcuts</button>
+              {(workspaces as any[]).length > 1 && (
+                <div className="suite-user-section">
+                  <div className="suite-user-section-label">Workspace{activeWorkspace ? ` · ${activeWorkspace.name}` : ""}</div>
+                  <select
+                    className="suite-user-select"
+                    value={activeWorkspace?.id || ""}
+                    onChange={(e) => switchWorkspace(e.target.value)}
+                  >
+                    {(workspaces as any[]).map((w) => (
+                      <option key={w.id} value={w.id}>{w.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <button className="suite-user-item" onClick={() => { setUserOpen(false); navigate("/admin"); }}>{t("shell.workspaceSettings")}</button>
+              <button className="suite-user-item" onClick={() => { setUserOpen(false); setCheatsheetOpen(true); }}>{t("shell.keyboardShortcuts")}</button>
               <div className="suite-user-section">
-                <div className="suite-user-section-label">Density</div>
+                <div className="suite-user-section-label">{t("shell.density")}</div>
                 <div className="suite-density-toggle" role="radiogroup" aria-label="Row density">
                   <button
                     type="button"
@@ -223,7 +272,7 @@ export default function SuiteBar() {
                     className={`suite-density-opt ${density === "comfortable" ? "active" : ""}`}
                     onClick={() => setDensity("comfortable")}
                   >
-                    Comfortable
+                    {t("shell.densityComfortable")}
                   </button>
                   <button
                     type="button"
@@ -232,11 +281,126 @@ export default function SuiteBar() {
                     className={`suite-density-opt ${density === "compact" ? "active" : ""}`}
                     onClick={() => setDensity("compact")}
                   >
-                    Compact
+                    {t("shell.densityCompact")}
                   </button>
                 </div>
               </div>
-              <button className="suite-user-item danger" onClick={handleLogout}>Sign out</button>
+              <div className="suite-user-section">
+                <div className="suite-user-section-label">{t("shell.language")}</div>
+                <select
+                  className="suite-user-select"
+                  value={user?.language || i18n.language}
+                  onChange={(e) => void changeLanguage(e.target.value)}
+                >
+                  {SUPPORTED_LANGUAGES.map((l) => (
+                    <option key={l.code} value={l.code}>{l.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="suite-user-section">
+                <div className="suite-user-section-label">{t("shell.timezone")}</div>
+                <select
+                  className="suite-user-select"
+                  value={user?.timezone || "UTC"}
+                  onChange={(e) => void changeTimezone(e.target.value)}
+                >
+                  {COMMON_TIMEZONES.map((tz) => (
+                    <option key={tz} value={tz}>{tz}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="suite-user-section">
+                <div className="suite-user-section-label">Notifications</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", fontSize: "0.78rem" }}>
+                    <input
+                      type="checkbox"
+                      checked={user?.notify_email ?? true}
+                      onChange={async (e) => {
+                        const v = e.target.checked;
+                        const r: any = await updateSettings({ notify_email: v });
+                        if (!r.error) dispatch(patchUser({ notify_email: v }));
+                      }}
+                    />
+                    Email
+                  </label>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", fontSize: "0.78rem" }}>
+                    <input
+                      type="checkbox"
+                      checked={user?.notify_sms ?? false}
+                      onChange={async (e) => {
+                        const v = e.target.checked;
+                        const r: any = await updateSettings({ notify_sms: v });
+                        if (!r.error) dispatch(patchUser({ notify_sms: v }));
+                      }}
+                    />
+                    SMS
+                  </label>
+                  <input
+                    type="tel"
+                    className="suite-user-select"
+                    placeholder="Phone (E.164, e.g. +14155551234)"
+                    defaultValue={user?.phone || ""}
+                    onBlur={async (e) => {
+                      const v = e.target.value.trim();
+                      if (v === (user?.phone || "")) return;
+                      const r: any = await updateSettings({ phone: v || null });
+                      if (!r.error) dispatch(patchUser({ phone: v || null }));
+                    }}
+                  />
+                </div>
+              </div>
+              <button
+                className="suite-user-item"
+                onClick={async () => {
+                  setUserOpen(false);
+                  const token = localStorage.getItem("token");
+                  if (!token) return;
+                  try {
+                    const r = await fetch(`${import.meta.env.VITE_API_URL || ""}/api/gdpr/export`, {
+                      headers: { Authorization: `Bearer ${token}` },
+                    });
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    const blob = await r.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `gdpr-export-${(user?.id || "me").slice(0, 8)}.zip`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                  } catch (e: any) {
+                    alert(`Export failed: ${e?.message || e}`);
+                  }
+                }}
+              >
+                Download my data
+              </button>
+              <button
+                className="suite-user-item danger"
+                onClick={async () => {
+                  setUserOpen(false);
+                  const sure = window.confirm(
+                    "Permanently delete your account?\n\nYour login will be removed and your name + email anonymized. Audit history is preserved.\n\nThis cannot be undone.",
+                  );
+                  if (!sure) return;
+                  const token = localStorage.getItem("token");
+                  try {
+                    const r = await fetch(`${import.meta.env.VITE_API_URL || ""}/api/gdpr/me?confirm=true`, {
+                      method: "DELETE",
+                      headers: { Authorization: `Bearer ${token}` },
+                    });
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    handleLogout();
+                  } catch (e: any) {
+                    alert(`Delete failed: ${e?.message || e}`);
+                  }
+                }}
+              >
+                Delete my account…
+              </button>
+              <button className="suite-user-item danger" onClick={handleLogout}>{t("common.signOut")}</button>
             </div>
           )}
         </div>

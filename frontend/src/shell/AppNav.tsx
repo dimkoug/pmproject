@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { AppDef, NavGroup } from "./navConfig";
+import { useRecentPages } from "./useRecentPages";
 
 type Props = {
   app: AppDef;
@@ -12,6 +13,7 @@ type Props = {
 
 export default function AppNav({ app, groups, basePath, title, subtitle, topSlot }: Props) {
   const resolvedGroups = groups ?? app.groups;
+  const recent = useRecentPages();
 
   const buildTo = (to: string) => {
     if (!basePath) return to;
@@ -46,6 +48,22 @@ export default function AppNav({ app, groups, basePath, title, subtitle, topSlot
             ))}
           </div>
         ))}
+        {recent.length > 1 && (
+          <div className="app-nav-group app-nav-group-recent">
+            <div className="app-nav-group-title">Recent</div>
+            {recent.slice(1).map((r) => (
+              <NavLink
+                key={r.to}
+                to={r.to}
+                end
+                className={({ isActive }) => `app-nav-item app-nav-item-recent ${isActive ? "active" : ""}`}
+                title={r.to}
+              >
+                {r.label}
+              </NavLink>
+            ))}
+          </div>
+        )}
       </nav>
     </aside>
   );

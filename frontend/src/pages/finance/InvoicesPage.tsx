@@ -1,13 +1,13 @@
 import { useMemo } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { useGetInvoicesQuery, useCreateInvoiceMutation, useUpdateInvoiceStatusMutation } from "../../services/api";
+import { useGetInvoicesQuery, useCreateInvoiceMutation, useUpdateInvoiceStatusMutation, useCreateInvoiceCheckoutSessionMutation } from "../../services/api";
 import { useProjectContext } from "../../shell/useProjectContext";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
 import DataTable from "../../shell/DataTable";
 import { useDrawerPeek } from "../../shell/DetailDrawer";
 import { downloadCsv } from "../../shell/csvExport";
-import { promptForValues } from "../../shell/modalService";
+import { promptForValues, notifyUser } from "../../shell/modalService";
 
 const INVOICE_STATUSES = ["draft", "sent", "paid", "overdue", "cancelled"];
 
@@ -25,6 +25,7 @@ export default function InvoicesPage() {
   const { data: invoices = [], isLoading, refetch } = useGetInvoicesQuery(projectId);
   const [createInvoice] = useCreateInvoiceMutation();
   const [updateStatus] = useUpdateInvoiceStatusMutation();
+  const [createCheckout] = useCreateInvoiceCheckoutSessionMutation();
   const { open: openPeek } = useDrawerPeek();
 
   const columns = useMemo<ColumnDef<Invoice, any>[]>(
@@ -70,8 +71,36 @@ export default function InvoicesPage() {
         header: "Due",
         cell: (c) => (c.getValue() as string) || "-",
       },
+      {
+        id: "actions",
+        header: "Actions",
+        enableSorting: false,
+        cell: (c) => {
+          const inv = c.row.original;
+          if (inv.invoice_type !== "receivable" || inv.status === "paid") return null;
+          return (
+            <button
+              className="btn btn-sm"
+              onClick={async (e) => {
+                e.stopPropagation();
+                const r: any = await createCheckout(inv.id);
+                if (r.error) {
+                  await notifyUser({
+                    title: "Stripe checkout failed",
+                    description: (r.error as any)?.data?.detail || "Set STRIPE_SECRET_KEY to enable.",
+                  });
+                  return;
+                }
+                if (r.data?.url) window.open(r.data.url, "_blank", "noopener");
+              }}
+            >
+              Pay with Stripe
+            </button>
+          );
+        },
+      },
     ],
-    [updateStatus, refetch],
+    [updateStatus, refetch, createCheckout],
   );
 
   return (

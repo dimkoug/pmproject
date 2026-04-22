@@ -5,6 +5,12 @@ interface User {
   email: string;
   name: string;
   is_active: boolean;
+  timezone?: string;
+  language?: string;
+  phone?: string | null;
+  notify_email?: boolean;
+  notify_sms?: boolean;
+  is_totp_enabled?: boolean;
   created_at: string;
 }
 
@@ -28,6 +34,11 @@ const authSlice = createSlice({
       localStorage.setItem("token", action.payload.token);
       localStorage.setItem("user", JSON.stringify(action.payload.user));
     },
+    patchUser(state, action: PayloadAction<Partial<User>>) {
+      if (!state.user) return;
+      state.user = { ...state.user, ...action.payload };
+      localStorage.setItem("user", JSON.stringify(state.user));
+    },
     logout(state) {
       state.token = null;
       state.user = null;
@@ -37,5 +48,5 @@ const authSlice = createSlice({
   },
 });
 
-export const { setCredentials, logout } = authSlice.actions;
+export const { setCredentials, patchUser, logout } = authSlice.actions;
 export default authSlice.reducer;

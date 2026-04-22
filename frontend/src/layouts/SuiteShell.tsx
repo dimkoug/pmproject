@@ -2,6 +2,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import SuiteBar from "../shell/SuiteBar";
 import DetailDrawer from "../shell/DetailDrawer";
 import ModalHost from "../shell/modalService";
+import OnboardingWizard from "../shell/OnboardingWizard";
 import "../shell/drawerBodies";
 import { useProjectWebSocket } from "../services/useWebSocket";
 
@@ -22,6 +23,7 @@ export default function SuiteShell() {
       </div>
       <DetailDrawer />
       <ModalHost />
+      <OnboardingWizard />
     </div>
   );
 }

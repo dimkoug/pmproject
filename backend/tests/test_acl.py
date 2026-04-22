@@ -40,8 +40,10 @@ async def test_list_permissions(client: AsyncClient):
     resp = await client.get("/api/admin/acl/permissions")
     assert resp.status_code == 200
     perms = resp.json()
-    # Catalog seeded in conftest has 58 entries
-    assert len(perms) == 58
+    # Assert against the live catalog (it grows as features ship) and check
+    # well-known anchors are present rather than freezing a count.
+    from app.acl.catalog import CATALOG
+    assert len(perms) == len(CATALOG)
     codenames = {p["codename"] for p in perms}
     assert "admin.group.manage" in codenames
     assert "documents.folder.manage" in codenames

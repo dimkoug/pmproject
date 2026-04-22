@@ -1,0 +1,54 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "confirm": "Confirm",
+    "close": "Close",
+    "search": "Search",
+    "loading": "Loading…",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "empty": "Nothing here yet",
+    "yes": "Yes",
+    "no": "No",
+    "required": "Required",
+    "optional": "Optional",
+    "signOut": "Sign out",
+    "signIn": "Sign in"
+  },
+  "shell": {
+    "searchEverywhere": "Search everywhere…",
+    "searchThisProject": "Search this project…",
+    "notifications": "Notifications",
+    "noNotifications": "You're all caught up.",
+    "markAllRead": "Mark all read",
+    "density": "Density",
+    "densityComfortable": "Comfortable",
+    "densityCompact": "Compact",
+    "language": "Language",
+    "timezone": "Time zone",
+    "workspaceSettings": "Workspace settings",
+    "keyboardShortcuts": "Keyboard shortcuts",
+    "lightMode": "Light mode",
+    "darkMode": "Dark mode",
+    "apps": "Apps",
+    "live": "Live",
+    "offline": "Offline"
+  },
+  "apps": {
+    "projects": "Projects",
+    "sales": "Sales",
+    "finance": "Finance",
+    "documents": "Documents",
+    "admin": "Admin"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "overview": "Overview",
+    "reports": "Reports"
+  }
+}

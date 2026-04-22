@@ -1,7 +1,7 @@
 services:
   # ── PostgreSQL primary ─────────────────────────────────────────────
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: always
     environment:
       POSTGRES_USER: pmuser
@@ -39,7 +39,7 @@ services:
 
   # ── PostgreSQL read replica (optional; enable with --profile replica)
   db-replica:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: always
     profiles: ["replica"]
     environment:

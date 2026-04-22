@@ -13,6 +13,7 @@ import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
 import { confirmAction, notifyUser } from "../../shell/modalService";
 import { Icon } from "../../shell/icons";
+import { useFileDropTarget } from "../../shell/useFileDropTarget";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -103,6 +104,21 @@ export default function FilesPage() {
     e.target.value = "";
   };
 
+  // Drag-and-drop uploads: single file goes through the expiry modal;
+  // multiple files are uploaded in sequence straight to the current folder.
+  const { isOver, dragHandlers } = useFileDropTarget((files) => {
+    if (files.length === 1) {
+      setPendingUpload(files[0]);
+      return;
+    }
+    (async () => {
+      for (const f of Array.from(files)) {
+        await performUpload(f, "");
+      }
+      notifyUser({ title: "Upload complete", description: `${files.length} files uploaded.` });
+    })();
+  });
+
   const submitPendingUpload = async () => {
     if (!pendingUpload) return;
     await performUpload(pendingUpload, uploadExpiry);
@@ -111,8 +127,21 @@ export default function FilesPage() {
   };
 
   return (
-    <div>
-      <PageHeader title="Files" subtitle="Browse folders, upload files, manage versions and sharing." />
+    <div {...dragHandlers} style={{ position: "relative", minHeight: "100%" }}>
+      {isOver && (
+        <div className="file-drop-overlay" aria-hidden>
+          <div className="file-drop-hint">
+            <Icon.Upload size={32} />
+            <div style={{ marginTop: "0.5rem", fontSize: "1.1rem", fontWeight: 600 }}>
+              Drop files to upload
+            </div>
+            <div style={{ fontSize: "0.82rem", color: "var(--gray-500)", marginTop: "0.25rem" }}>
+              {folderPath.length === 0 ? "Uploads to the root folder" : `Uploads to "${folderPath[folderPath.length - 1].name}"`}
+            </div>
+          </div>
+        </div>
+      )}
+      <PageHeader title="Files" subtitle="Browse folders, upload files, manage versions and sharing — or drop them here." />
       <CommandBar
         items={[
           { key: "new-folder", label: "New folder", onClick: () => setShowNewFolder(true) },

@@ -13,10 +13,13 @@ import {
   useGetVendorsQuery,
   useGetExpensesQuery,
   useGetAssetsQuery,
+  useGetEmployeesQuery,
+  useGetLeaveRequestsQuery,
 } from "../services/api";
 import type { DrawerBody, DrawerContext } from "./DetailDrawer";
 import { registerDrawerBody } from "./DetailDrawer";
 import { CommentsTab, OverviewGrid } from "./drawerTabs";
+import { useFormat } from "../i18n/format";
 
 function fallbackTitle(entity: string, id: string) {
   return `${entity} ${id.slice(0, 8)}…`;
@@ -26,19 +29,21 @@ function fallbackTitle(entity: string, id: string) {
 
 function InvoiceOverview({ ctx }: { ctx: DrawerContext }) {
   const { data: invoices = [] } = useGetInvoicesQuery(undefined);
+  const { formatCurrency, formatDate } = useFormat();
   const inv = invoices.find((i: any) => i.id === ctx.id);
   if (!inv) return <div style={{ color: "var(--gray-500)" }}>Invoice not found in current list.</div>;
+  const currency = inv.currency || "USD";
   return (
     <OverviewGrid
       rows={[
         { label: "Number", value: inv.invoice_number },
         { label: "Type", value: inv.invoice_type },
         { label: "Status", value: <span className="badge badge-blue">{inv.status}</span> },
-        { label: "Subtotal", value: inv.subtotal != null ? `$${inv.subtotal.toLocaleString()}` : null },
+        { label: "Subtotal", value: formatCurrency(inv.subtotal, currency) },
         { label: "Tax rate", value: inv.tax_rate != null ? `${inv.tax_rate}%` : null },
-        { label: "Total", value: inv.total != null ? `$${inv.total.toLocaleString()}` : null },
-        { label: "Due", value: inv.due_date },
-        { label: "Issued", value: inv.issue_date },
+        { label: "Total", value: formatCurrency(inv.total, currency) },
+        { label: "Due", value: formatDate(inv.due_date) },
+        { label: "Issued", value: formatDate(inv.issue_date) },
       ]}
     />
   );
@@ -63,6 +68,7 @@ const invoiceBody: DrawerBody = {
 
 function OpportunityOverview({ ctx }: { ctx: DrawerContext }) {
   const { data: opps = [] } = useGetOpportunitiesQuery();
+  const { formatCurrency, formatDate } = useFormat();
   const o = opps.find((x: any) => x.id === ctx.id);
   if (!o) return <div style={{ color: "var(--gray-500)" }}>Opportunity not found in current list.</div>;
   return (
@@ -70,9 +76,9 @@ function OpportunityOverview({ ctx }: { ctx: DrawerContext }) {
       rows={[
         { label: "Title", value: o.title },
         { label: "Stage", value: <span className="badge badge-blue">{o.stage}</span> },
-        { label: "Amount", value: o.amount != null ? `$${o.amount.toLocaleString()}` : null },
+        { label: "Amount", value: formatCurrency(o.amount) },
         { label: "Probability", value: o.probability != null ? `${o.probability}%` : null },
-        { label: "Close date", value: o.close_date },
+        { label: "Close date", value: formatDate(o.close_date) },
         { label: "Company", value: o.company_id ? `${o.company_id.slice(0, 8)}…` : null },
       ]}
     />
@@ -98,6 +104,7 @@ const opportunityBody: DrawerBody = {
 
 function CompanyOverview({ ctx }: { ctx: DrawerContext }) {
   const { data: companies = [] } = useGetCompaniesQuery();
+  const { formatCurrency } = useFormat();
   const c = companies.find((x: any) => x.id === ctx.id);
   if (!c) return <div style={{ color: "var(--gray-500)" }}>Company not found in current list.</div>;
   return (
@@ -106,7 +113,7 @@ function CompanyOverview({ ctx }: { ctx: DrawerContext }) {
         { label: "Name", value: c.name },
         { label: "Industry", value: c.industry },
         { label: "Website", value: c.website },
-        { label: "Revenue", value: c.annual_revenue != null ? `$${c.annual_revenue.toLocaleString()}` : null },
+        { label: "Revenue", value: formatCurrency(c.annual_revenue) },
         { label: "Employees", value: c.employee_count },
         { label: "Health", value: c.health_score != null ? `${c.health_score}/100` : null },
       ]}
@@ -133,6 +140,7 @@ const companyBody: DrawerBody = {
 
 function LeadOverview({ ctx }: { ctx: DrawerContext }) {
   const { data: leads = [] } = useGetLeadsQuery();
+  const { formatCurrency } = useFormat();
   const l = leads.find((x: any) => x.id === ctx.id);
   if (!l) return <div style={{ color: "var(--gray-500)" }}>Lead not found in current list.</div>;
   return (
@@ -143,7 +151,7 @@ function LeadOverview({ ctx }: { ctx: DrawerContext }) {
         { label: "Source", value: <span className="badge badge-gray">{l.source}</span> },
         { label: "Status", value: <span className="badge badge-blue">{l.status}</span> },
         { label: "Score", value: l.score },
-        { label: "Estimated value", value: l.estimated_value != null ? `$${l.estimated_value.toLocaleString()}` : null },
+        { label: "Estimated value", value: formatCurrency(l.estimated_value) },
         { label: "Email", value: l.email },
       ]}
     />
@@ -239,6 +247,7 @@ const vendorBody: DrawerBody = {
 
 function ExpenseOverview({ ctx }: { ctx: DrawerContext }) {
   const { data: expenses = [] } = useGetExpensesQuery(undefined);
+  const { formatCurrency, formatDate } = useFormat();
   const e = expenses.find((x: any) => x.id === ctx.id);
   if (!e) return <div style={{ color: "var(--gray-500)" }}>Expense not found in current list.</div>;
   return (
@@ -246,8 +255,8 @@ function ExpenseOverview({ ctx }: { ctx: DrawerContext }) {
       rows={[
         { label: "Description", value: e.description },
         { label: "Category", value: <span className="badge badge-gray">{e.category}</span> },
-        { label: "Amount", value: e.amount != null ? `$${e.amount.toLocaleString()}` : null },
-        { label: "Date", value: e.expense_date },
+        { label: "Amount", value: formatCurrency(e.amount, e.currency || "USD") },
+        { label: "Date", value: formatDate(e.expense_date) },
         {
           label: "Approved",
           value: e.is_approved ? (
@@ -281,6 +290,7 @@ const expenseBody: DrawerBody = {
 
 function AssetOverview({ ctx }: { ctx: DrawerContext }) {
   const { data: assets = [] } = useGetAssetsQuery(undefined);
+  const { formatCurrency, formatDate } = useFormat();
   const a = assets.find((x: any) => x.id === ctx.id);
   if (!a) return <div style={{ color: "var(--gray-500)" }}>Asset not found in current list.</div>;
   return (
@@ -290,10 +300,10 @@ function AssetOverview({ ctx }: { ctx: DrawerContext }) {
         { label: "Tag", value: a.asset_tag },
         { label: "Category", value: a.category },
         { label: "Status", value: <span className="badge badge-blue">{a.status}</span> },
-        { label: "Current value", value: a.current_value != null ? `$${a.current_value.toLocaleString()}` : null },
-        { label: "Purchase price", value: a.purchase_price != null ? `$${a.purchase_price.toLocaleString()}` : null },
+        { label: "Current value", value: formatCurrency(a.current_value) },
+        { label: "Purchase price", value: formatCurrency(a.purchase_price) },
         { label: "Location", value: a.location },
-        { label: "Acquired", value: a.acquisition_date },
+        { label: "Acquired", value: formatDate(a.acquisition_date) },
       ]}
     />
   );
@@ -314,6 +324,55 @@ const assetBody: DrawerBody = {
   defaultTab: "overview",
 };
 
+// --- Employee ----------------------------------------------------------------
+
+function EmployeeOverview({ ctx }: { ctx: DrawerContext }) {
+  const { data: employees = [] } = useGetEmployeesQuery();
+  const { data: leaves = [] } = useGetLeaveRequestsQuery({ employeeId: ctx.id });
+  const { formatDate } = useFormat();
+  const e = (employees as any[]).find((x: any) => x.id === ctx.id);
+  if (!e) return <div style={{ color: "var(--gray-500)" }}>Employee not found in current list.</div>;
+  const pending = (leaves as any[]).filter((l) => l.status === "pending").length;
+  const approved = (leaves as any[]).filter((l) => l.status === "approved").length;
+  return (
+    <OverviewGrid
+      rows={[
+        { label: "Number", value: <code>{e.employee_number}</code> },
+        { label: "Name", value: e.full_name },
+        { label: "Email", value: e.email },
+        { label: "Phone", value: e.phone },
+        { label: "Department", value: e.department },
+        { label: "Job title", value: e.job_title },
+        { label: "Hired", value: formatDate(e.hire_date) },
+        {
+          label: "Status",
+          value: e.is_active ? (
+            <span className="badge badge-green">active</span>
+          ) : (
+            <span className="badge badge-gray">inactive</span>
+          ),
+        },
+        { label: "Leave (pending / approved)", value: `${pending} / ${approved}` },
+      ]}
+    />
+  );
+}
+
+function EmployeeTitle({ ctx }: { ctx: DrawerContext }) {
+  const { data: employees = [] } = useGetEmployeesQuery();
+  const e = (employees as any[]).find((x: any) => x.id === ctx.id);
+  return <>{e?.full_name ?? fallbackTitle("Employee", ctx.id)}</>;
+}
+
+const employeeBody: DrawerBody = {
+  title: (ctx) => <EmployeeTitle ctx={ctx} />,
+  tabs: {
+    overview: (ctx) => <EmployeeOverview ctx={ctx} />,
+    comments: (ctx) => <CommentsTab targetType="employee" targetId={ctx.id} />,
+  },
+  defaultTab: "overview",
+};
+
 // --- Registrations -----------------------------------------------------------
 
 registerDrawerBody("invoice", invoiceBody);
@@ -324,5 +383,6 @@ registerDrawerBody("contact", contactBody);
 registerDrawerBody("vendor", vendorBody);
 registerDrawerBody("expense", expenseBody);
 registerDrawerBody("asset", assetBody);
+registerDrawerBody("employee", employeeBody);
 
 export {};

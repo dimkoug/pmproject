@@ -8,7 +8,9 @@ from pydantic import BaseModel
 from sqlalchemy import String, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.acl.resolver import require_permission
+from app.acl.resolver import apply_field_mask, get_field_mask, require_permission
+from app.services.workspaces import get_active_workspace_id
+from fastapi import Request
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.crm import (
@@ -31,13 +33,35 @@ class CompanyCreate(BaseModel):
     name: str; industry: str | None = None; website: str | None = None; phone: str | None = None; address: str | None = None; annual_revenue: float | None = None; employee_count: int | None = None; notes: str | None = None
 
 @router.get("/companies")
-async def list_companies(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Company).order_by(Company.name).limit(200))
-    return [{"id": str(c.id), "name": c.name, "industry": c.industry, "website": c.website, "phone": c.phone, "annual_revenue": c.annual_revenue, "employee_count": c.employee_count} for c in result.scalars().all()]
+async def list_companies(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(Company).order_by(Company.name).limit(200)
+    ws_id = await get_active_workspace_id(request, current_user, db)
+    if ws_id is not None:
+        q = q.where((Company.workspace_id == ws_id) | (Company.workspace_id.is_(None)))
+    result = await db.execute(q)
+    masked = await get_field_mask(db, current_user, "company", request=request)
+    return [
+        apply_field_mask(
+            {"id": str(c.id), "name": c.name, "industry": c.industry, "website": c.website, "phone": c.phone, "annual_revenue": c.annual_revenue, "employee_count": c.employee_count},
+            masked,
+        )
+        for c in result.scalars().all()
+    ]
 
 @router.post("/companies", status_code=201, dependencies=[Depends(require_permission("sales.company.manage"))])
-async def create_company(p: CompanyCreate, db: AsyncSession = Depends(get_db)):
-    c = Company(**p.model_dump()); db.add(c); await db.commit(); await db.refresh(c)
+async def create_company(
+    p: CompanyCreate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ws_id = await get_active_workspace_id(request, current_user, db)
+    c = Company(**p.model_dump(), workspace_id=ws_id)
+    db.add(c); await db.commit(); await db.refresh(c)
     return {"id": str(c.id), "name": c.name}
 
 @router.delete("/companies/{company_id}", status_code=204, dependencies=[Depends(require_permission("sales.company.manage"))])
@@ -53,15 +77,29 @@ class ContactCreate(BaseModel):
     company_id: UUID | None = None; first_name: str; last_name: str | None = None; email: str | None = None; phone: str | None = None; job_title: str | None = None; notes: str | None = None
 
 @router.get("/contacts")
-async def list_contacts(company_id: UUID | None = None, db: AsyncSession = Depends(get_db)):
+async def list_contacts(
+    request: Request,
+    company_id: UUID | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     q = select(Contact).order_by(Contact.first_name).limit(200)
+    ws_id = await get_active_workspace_id(request, current_user, db)
+    if ws_id is not None:
+        q = q.where((Contact.workspace_id == ws_id) | (Contact.workspace_id.is_(None)))
     if company_id: q = q.where(Contact.company_id == company_id)
     result = await db.execute(q)
     return [{"id": str(c.id), "first_name": c.first_name, "last_name": c.last_name, "email": c.email, "phone": c.phone, "job_title": c.job_title, "company_id": str(c.company_id) if c.company_id else None} for c in result.scalars().all()]
 
 @router.post("/contacts", status_code=201, dependencies=[Depends(require_permission("sales.contact.manage"))])
-async def create_contact(p: ContactCreate, db: AsyncSession = Depends(get_db)):
-    c = Contact(**p.model_dump()); db.add(c); await db.commit(); await db.refresh(c)
+async def create_contact(
+    p: ContactCreate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ws_id = await get_active_workspace_id(request, current_user, db)
+    c = Contact(**p.model_dump(), workspace_id=ws_id); db.add(c); await db.commit(); await db.refresh(c)
     return {"id": str(c.id), "first_name": c.first_name}
 
 @router.delete("/contacts/{contact_id}", status_code=204, dependencies=[Depends(require_permission("sales.contact.manage"))])
@@ -77,15 +115,29 @@ class LeadCreate(BaseModel):
     contact_name: str; company_name: str | None = None; email: str | None = None; phone: str | None = None; source: LeadSource = LeadSource.OTHER; estimated_value: float | None = None; notes: str | None = None
 
 @router.get("/leads")
-async def list_leads(status: str | None = None, db: AsyncSession = Depends(get_db)):
+async def list_leads(
+    request: Request,
+    status: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     q = select(Lead).order_by(Lead.created_at.desc()).limit(200)
+    ws_id = await get_active_workspace_id(request, current_user, db)
+    if ws_id is not None:
+        q = q.where((Lead.workspace_id == ws_id) | (Lead.workspace_id.is_(None)))
     if status: q = q.where(cast(Lead.status, String) == status.upper())
     result = await db.execute(q)
     return [{"id": str(l.id), "contact_name": l.contact_name, "company_name": l.company_name, "email": l.email, "source": l.source.value, "status": l.status.value, "estimated_value": l.estimated_value} for l in result.scalars().all()]
 
 @router.post("/leads", status_code=201, dependencies=[Depends(require_permission("sales.lead.create"))])
-async def create_lead(p: LeadCreate, db: AsyncSession = Depends(get_db)):
-    l = Lead(**p.model_dump()); db.add(l); await db.commit(); await db.refresh(l)
+async def create_lead(
+    p: LeadCreate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ws_id = await get_active_workspace_id(request, current_user, db)
+    l = Lead(**p.model_dump(), workspace_id=ws_id); db.add(l); await db.commit(); await db.refresh(l)
     return {"id": str(l.id), "contact_name": l.contact_name}
 
 @router.patch("/leads/{lead_id}", dependencies=[Depends(require_permission("sales.lead.update_status"))])
@@ -102,16 +154,30 @@ class OpportunityCreate(BaseModel):
     company_id: UUID | None = None; contact_id: UUID | None = None; title: str; description: str | None = None; stage: OpportunityStage = OpportunityStage.PROSPECTING; amount: float | None = None; probability: int | None = None; expected_close: str | None = None
 
 @router.get("/opportunities")
-async def list_opportunities(stage: str | None = None, db: AsyncSession = Depends(get_db)):
+async def list_opportunities(
+    request: Request,
+    stage: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     q = select(Opportunity).order_by(Opportunity.created_at.desc()).limit(200)
+    ws_id = await get_active_workspace_id(request, current_user, db)
+    if ws_id is not None:
+        q = q.where((Opportunity.workspace_id == ws_id) | (Opportunity.workspace_id.is_(None)))
     if stage: q = q.where(cast(Opportunity.stage, String) == stage.upper())
     result = await db.execute(q)
     return [{"id": str(o.id), "title": o.title, "stage": o.stage.value, "amount": o.amount, "probability": o.probability, "expected_close": o.expected_close.isoformat()[:10] if o.expected_close else None, "company_id": str(o.company_id) if o.company_id else None} for o in result.scalars().all()]
 
 @router.post("/opportunities", status_code=201, dependencies=[Depends(require_permission("sales.opportunity.manage"))])
-async def create_opportunity(p: OpportunityCreate, db: AsyncSession = Depends(get_db)):
+async def create_opportunity(
+    p: OpportunityCreate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     from datetime import datetime
-    o = Opportunity(**{**p.model_dump(exclude={"expected_close"}), "expected_close": datetime.fromisoformat(p.expected_close) if p.expected_close else None})
+    ws_id = await get_active_workspace_id(request, current_user, db)
+    o = Opportunity(**{**p.model_dump(exclude={"expected_close"}), "expected_close": datetime.fromisoformat(p.expected_close) if p.expected_close else None}, workspace_id=ws_id)
     db.add(o); await db.commit(); await db.refresh(o)
     return {"id": str(o.id), "title": o.title}
 
@@ -269,20 +335,35 @@ class QuoteCreate(BaseModel):
     items: list[QuoteItemIn] = []
 
 @router.get("/quotes")
-async def list_quotes(opportunity_id: UUID | None = None, db: AsyncSession = Depends(get_db)):
+async def list_quotes(
+    request: Request,
+    opportunity_id: UUID | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     q = select(Quote).order_by(Quote.created_at.desc()).limit(200)
+    ws_id = await get_active_workspace_id(request, current_user, db)
+    if ws_id is not None:
+        q = q.where((Quote.workspace_id == ws_id) | (Quote.workspace_id.is_(None)))
     if opportunity_id: q = q.where(Quote.opportunity_id == opportunity_id)
     result = await db.execute(q)
     return [{"id": str(qt.id), "quote_number": qt.quote_number, "status": qt.status.value, "total": qt.total, "valid_until": qt.valid_until.isoformat()[:10] if qt.valid_until else None, "company_id": str(qt.company_id) if qt.company_id else None, "opportunity_id": str(qt.opportunity_id) if qt.opportunity_id else None, "invoice_id": str(qt.invoice_id) if qt.invoice_id else None} for qt in result.scalars().all()]
 
 @router.post("/quotes", status_code=201, dependencies=[Depends(require_permission("sales.quote.manage"))])
-async def create_quote(p: QuoteCreate, db: AsyncSession = Depends(get_db)):
+async def create_quote(
+    p: QuoteCreate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ws_id = await get_active_workspace_id(request, current_user, db)
     subtotal = sum((i.quantity or 1) * (i.unit_price or 0) for i in p.items)
     tax = subtotal * p.tax_rate / 100
     q = Quote(opportunity_id=p.opportunity_id, company_id=p.company_id, contact_id=p.contact_id,
               quote_number=p.quote_number, subtotal=round(subtotal, 2), tax_rate=p.tax_rate,
               total=round(subtotal + tax, 2), notes=p.notes,
-              valid_until=datetime.fromisoformat(p.valid_until) if p.valid_until else None)
+              valid_until=datetime.fromisoformat(p.valid_until) if p.valid_until else None,
+              workspace_id=ws_id)
     db.add(q); await db.flush()
     for i in p.items:
         amt = (i.quantity or 1) * (i.unit_price or 0)

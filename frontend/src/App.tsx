@@ -4,6 +4,11 @@ import SuiteShell from "./layouts/SuiteShell";
 import AppLayout from "./layouts/AppLayout";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
+import SsoCallbackPage from "./pages/SsoCallbackPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
+import PortalLoginPage from "./pages/portal/PortalLoginPage";
+import PortalDashboardPage from "./pages/portal/PortalDashboardPage";
 import ProjectList from "./pages/ProjectList";
 import PortfolioPage from "./pages/PortfolioPage";
 import ProjectLayout from "./pages/ProjectLayout";
@@ -49,6 +54,13 @@ import PnlPage from "./pages/finance/PnlPage";
 import BalanceSheetPage from "./pages/finance/BalanceSheetPage";
 import CashFlowPage from "./pages/finance/CashFlowPage";
 import RequisitionsPage from "./pages/finance/RequisitionsPage";
+import GoodsReceiptsPage from "./pages/finance/GoodsReceiptsPage";
+import RfqsPage from "./pages/finance/RfqsPage";
+import BatchesPage from "./pages/finance/BatchesPage";
+import SerialsPage from "./pages/finance/SerialsPage";
+import BankReconciliationPage from "./pages/finance/BankReconciliationPage";
+import CentersPage from "./pages/finance/CentersPage";
+import ShipmentsPage from "./pages/finance/ShipmentsPage";
 import SalesDashboardPage from "./pages/sales/SalesDashboardPage";
 import CompaniesPage from "./pages/sales/CompaniesPage";
 import ContactsPage from "./pages/sales/ContactsPage";
@@ -56,6 +68,7 @@ import LeadsPage from "./pages/sales/LeadsPage";
 import OpportunitiesPage from "./pages/sales/OpportunitiesPage";
 import InteractionsPage from "./pages/sales/InteractionsPage";
 import QuotesPage from "./pages/sales/QuotesPage";
+import SalesOrdersPage from "./pages/sales/SalesOrdersPage";
 import CampaignsPage from "./pages/sales/CampaignsPage";
 import ForecastPage from "./pages/sales/ForecastPage";
 import FollowUpsPage from "./pages/sales/FollowUpsPage";
@@ -76,16 +89,31 @@ import AnnotationsPage from "./pages/documents/AnnotationsPage";
 import ScansPage from "./pages/documents/ScansPage";
 import UsageReportPage from "./pages/documents/UsageReportPage";
 import PendingApprovalsPage from "./pages/documents/PendingApprovalsPage";
+import DocQaPage from "./pages/documents/DocQaPage";
 import AdminPage from "./pages/AdminPage";
 import AclGroupsPage from "./pages/admin/AclGroupsPage";
 import AclPermissionsPage from "./pages/admin/AclPermissionsPage";
 import AclUsersPage from "./pages/admin/AclUsersPage";
 import AclInspectorPage from "./pages/admin/AclInspectorPage";
+import TagsPage from "./pages/admin/TagsPage";
+import AutomationPage from "./pages/admin/AutomationPage";
+import HrDashboardPage from "./pages/admin/HrDashboardPage";
+import EmployeesPage from "./pages/admin/EmployeesPage";
+import LeavePage from "./pages/admin/LeavePage";
+import AttendancePage from "./pages/admin/AttendancePage";
+import SecurityPage from "./pages/admin/SecurityPage";
+import TrashPage from "./pages/admin/TrashPage";
+import TimesheetsPage from "./pages/admin/TimesheetsPage";
 
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/login/sso-callback" element={<SsoCallbackPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/portal/login" element={<PortalLoginPage />} />
+      <Route path="/portal" element={<PortalDashboardPage />} />
       <Route path="/signup" element={<SignupPage />} />
 
       <Route element={<ProtectedRoute><SuiteShell /></ProtectedRoute>}>
@@ -129,6 +157,7 @@ export default function App() {
           <Route path="opportunities" element={<OpportunitiesPage />} />
           <Route path="interactions" element={<InteractionsPage />} />
           <Route path="quotes" element={<QuotesPage />} />
+          <Route path="orders" element={<SalesOrdersPage />} />
           <Route path="campaigns" element={<CampaignsPage />} />
           <Route path="forecast" element={<ForecastPage />} />
           <Route path="follow-ups" element={<FollowUpsPage />} />
@@ -150,11 +179,18 @@ export default function App() {
           <Route path="vendors" element={<VendorsPage />} />
           <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
           <Route path="requisitions" element={<RequisitionsPage />} />
+          <Route path="goods-receipts" element={<GoodsReceiptsPage />} />
+          <Route path="rfqs" element={<RfqsPage />} />
           <Route path="accounts" element={<AccountsPage />} />
           <Route path="journal" element={<JournalPage />} />
           <Route path="bank" element={<BankPage />} />
+          <Route path="reconciliation" element={<BankReconciliationPage />} />
+          <Route path="centers" element={<CentersPage />} />
+          <Route path="shipments" element={<ShipmentsPage />} />
           <Route path="trial-balance" element={<TrialBalancePage />} />
           <Route path="inventory" element={<InventoryPage />} />
+          <Route path="batches" element={<BatchesPage />} />
+          <Route path="serials" element={<SerialsPage />} />
           <Route path="assets" element={<AssetsPage />} />
           <Route path="depreciation" element={<DepreciationPage />} />
           <Route path="budgets" element={<BudgetsPage />} />
@@ -174,6 +210,7 @@ export default function App() {
             <Route path="workflows" element={<WorkflowsPage />} />
             <Route path="annotations" element={<AnnotationsPage />} />
             <Route path="scans" element={<ScansPage />} />
+            <Route path="qa" element={<DocQaPage />} />
             <Route path="reports/usage" element={<UsageReportPage />} />
             <Route path="reports/pending" element={<PendingApprovalsPage />} />
           </Route>
@@ -186,6 +223,15 @@ export default function App() {
           <Route path="acl/permissions" element={<AclPermissionsPage />} />
           <Route path="acl/users" element={<AclUsersPage />} />
           <Route path="acl/inspector" element={<AclInspectorPage />} />
+          <Route path="tags" element={<TagsPage />} />
+          <Route path="automation" element={<AutomationPage />} />
+          <Route path="hr" element={<HrDashboardPage />} />
+          <Route path="hr/employees" element={<EmployeesPage />} />
+          <Route path="hr/leave" element={<LeavePage />} />
+          <Route path="hr/attendance" element={<AttendancePage />} />
+          <Route path="hr/timesheets" element={<TimesheetsPage />} />
+          <Route path="security" element={<SecurityPage />} />
+          <Route path="trash" element={<TrashPage />} />
         </Route>
       </Route>
 

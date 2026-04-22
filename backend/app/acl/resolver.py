@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models.acl import Group, Permission, ProjectMember, UserPermission, group_permissions, user_groups
+from app.models.acl import FieldMask, Group, Permission, ProjectMember, UserPermission, group_permissions, user_groups
 from app.models.user import User, UserRole
 
 
@@ -150,6 +150,68 @@ def require_permission(codename: str, *, allow_any: Iterable[str] | None = None)
         return None
 
     return _dep
+
+
+# ── Field-level masking (#77) ────────────────────────────────────────────
+
+
+async def get_field_mask(
+    db: AsyncSession,
+    user: User,
+    entity_type: str,
+    request: Request | None = None,
+) -> set[str]:
+    """Return the set of field names this user CANNOT see for `entity_type`.
+
+    Algorithm: collect every FieldMask row for this entity_type. For each row,
+    if the user has the row's `unmask_codename`, ignore it (they can see those
+    fields). Otherwise union its `fields` into the mask. Admins always bypass
+    (return empty set) because admin-bypass on codenames means they implicitly
+    hold every unmask codename.
+    """
+    if user.role == UserRole.ADMIN:
+        return set()
+
+    # Cache per (entity_type) on request state to avoid repeated lookups
+    cache_key = f"_field_mask:{entity_type}"
+    if request is not None:
+        cached = getattr(request.state, cache_key, None)
+        if cached is not None:
+            return cached
+
+    rules = (await db.execute(
+        select(FieldMask).where(FieldMask.entity_type == entity_type)
+    )).scalars().all()
+    if not rules:
+        result: set[str] = set()
+    else:
+        effective = await _user_effective(db, user, request=request)
+        masked: set[str] = set()
+        for rule in rules:
+            if rule.unmask_codename in effective:
+                continue
+            for f in (rule.fields or []):
+                masked.add(f)
+        result = masked
+
+    if request is not None:
+        setattr(request.state, cache_key, result)
+    return result
+
+
+def apply_field_mask(row: dict, masked: set[str]) -> dict:
+    """Return a copy of `row` with masked fields replaced by None.
+
+    Use None rather than deletion so the JSON shape stays predictable on the
+    client — a `null` value renders as "—" via the existing format helpers.
+    """
+    if not masked:
+        return row
+    out = dict(row)
+    for f in masked:
+        if f in out:
+            out[f] = None
+    return out
 
 
 async def require_project_permission_body(

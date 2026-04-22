@@ -26,5 +26,10 @@ celery[redis]==5.4.0
 aioredis==2.0.1
 # --- Observability ---
 prometheus-fastapi-instrumentator==7.0.0
+# --- 2FA / TOTP (#45) ---
+pyotp==2.9.0
+qrcode==7.4.2
+# --- Semantic search (#49) ---
+pgvector==0.3.6
 # --- Seeding ---
 Faker==40.4.0

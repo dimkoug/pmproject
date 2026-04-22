@@ -115,6 +115,26 @@ async def my_permissions(
     return MePermissionsOut(role=user.role.value, granted=sorted(granted - denied), denied=sorted(denied))
 
 
+@router.get("/me/field-masks")
+async def my_field_masks(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns { entity_type: [masked_field, ...] } so the UI can show muted/locked
+    indicators on fields the current user cannot see."""
+    from app.acl.resolver import get_field_mask
+    from app.models.acl import FieldMask
+    from sqlalchemy import select as _select
+    entity_types = sorted({m.entity_type for m in (await db.scalars(_select(FieldMask))).all()})
+    out: dict[str, list[str]] = {}
+    for et in entity_types:
+        fields = await get_field_mask(db, user, et, request=request)
+        if fields:
+            out[et] = sorted(fields)
+    return out
+
+
 # ── Permission catalog (read-only) ───────────────────────────────────
 
 
@@ -456,4 +476,75 @@ async def remove_project_member(
             ProjectMember.user_id == user_id,
         )
     )
+    await db.commit()
+
+
+# ── Field masks (#77) ────────────────────────────────────────────────
+
+from app.models.acl import FieldMask
+
+
+class FieldMaskOut(BaseModel):
+    id: uuid.UUID
+    unmask_codename: str
+    entity_type: str
+    fields: list[str]
+    description: str | None = None
+
+
+class FieldMaskUpsert(BaseModel):
+    unmask_codename: str
+    entity_type: str
+    fields: list[str]
+    description: str | None = None
+
+
+@router.get("/admin/acl/field-masks", response_model=list[FieldMaskOut])
+async def list_field_masks(
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission("admin.field_mask.manage")),
+):
+    rows = (await db.scalars(select(FieldMask).order_by(FieldMask.entity_type, FieldMask.unmask_codename))).all()
+    return [FieldMaskOut(id=r.id, unmask_codename=r.unmask_codename, entity_type=r.entity_type, fields=r.fields or [], description=r.description) for r in rows]
+
+
+@router.post("/admin/acl/field-masks", response_model=FieldMaskOut, status_code=201)
+async def upsert_field_mask(
+    payload: FieldMaskUpsert,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission("admin.field_mask.manage")),
+):
+    existing = await db.scalar(
+        select(FieldMask).where(
+            FieldMask.unmask_codename == payload.unmask_codename,
+            FieldMask.entity_type == payload.entity_type,
+        )
+    )
+    if existing:
+        existing.fields = payload.fields
+        existing.description = payload.description
+        await db.commit()
+        return FieldMaskOut(id=existing.id, unmask_codename=existing.unmask_codename, entity_type=existing.entity_type, fields=existing.fields or [], description=existing.description)
+    fm = FieldMask(
+        unmask_codename=payload.unmask_codename,
+        entity_type=payload.entity_type,
+        fields=payload.fields,
+        description=payload.description,
+    )
+    db.add(fm)
+    await db.commit()
+    await db.refresh(fm)
+    return FieldMaskOut(id=fm.id, unmask_codename=fm.unmask_codename, entity_type=fm.entity_type, fields=fm.fields or [], description=fm.description)
+
+
+@router.delete("/admin/acl/field-masks/{mask_id}", status_code=204)
+async def delete_field_mask(
+    mask_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_permission("admin.field_mask.manage")),
+):
+    fm = await db.get(FieldMask, mask_id)
+    if not fm:
+        raise HTTPException(status_code=404, detail="Field mask not found")
+    await db.delete(fm)
     await db.commit()

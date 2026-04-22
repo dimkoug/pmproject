@@ -17,6 +17,7 @@ class Folder(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id"))
     project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"))
     parent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("dms_folders.id"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -50,6 +51,7 @@ class Document(Base):
     current_version: Mapped[int] = mapped_column(Integer, default=1)
     expiry_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -298,3 +300,43 @@ class ScanResult(Base):
     status: Mapped[ScanStatus] = mapped_column(Enum(ScanStatus), default=ScanStatus.PENDING)
     details: Mapped[str | None] = mapped_column(Text)
     scanned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── Semantic search (#49) ───────────────────────────────────────────
+
+# Try pgvector's Vector type; fall back to JSONB so the model still loads
+# without the extension. The semantic-search router branches on
+# pgvector availability at runtime.
+EMBEDDING_DIM = 1536  # OpenAI text-embedding-3-small (mock matches this)
+try:
+    from pgvector.sqlalchemy import Vector  # type: ignore
+    HAS_PGVECTOR = True
+    # JSON on non-postgres dialects so sqlite-backed test runs can still
+    # CREATE TABLE; pgvector's `<=>` operator only works on postgres anyway,
+    # so the semantic-search router gates on HAS_PGVECTOR.
+    from sqlalchemy import JSON as _JSON
+    _EMBED_TYPE = _JSON().with_variant(Vector(EMBEDDING_DIM), "postgresql")
+except Exception:  # pragma: no cover
+    from sqlalchemy.dialects.postgresql import JSONB
+    HAS_PGVECTOR = False
+    _EMBED_TYPE = JSONB
+
+
+class DocumentChunk(Base):
+    """A chunked, embedded slice of a document version. Documents get split
+    into ~500-char chunks; each chunk is embedded for vector search and so
+    that QA can cite specific passages."""
+
+    __tablename__ = "dms_document_chunks"
+    __table_args__ = (
+        Index("ix_dms_chunks_doc", "document_id"),
+        Index("ix_dms_chunks_version", "document_version_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("dms_documents.id", ondelete="CASCADE"), nullable=False)
+    document_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("dms_document_versions.id", ondelete="CASCADE"))
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding = mapped_column(_EMBED_TYPE)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

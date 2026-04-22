@@ -61,11 +61,12 @@ async def company_timeline(company_id: UUID, db: AsyncSession = Depends(get_db))
                        "date": q.created_at.isoformat() if q.created_at else None,
                        "title": f"Quote {q.quote_number}", "detail": f"${q.total}", "id": str(q.id)})
 
-    # Linked documents
+    # Linked documents — batch-load to avoid N+1 db.get() per link
     doc_links = (await db.execute(select(EntityLink).where(EntityLink.entity_type == EntityType.COMPANY, EntityLink.entity_id == company_id))).scalars().all()
-    for l in doc_links:
-        d = await db.get(Document, l.document_id)
-        if d:
+    if doc_links:
+        doc_ids = {l.document_id for l in doc_links}
+        docs = (await db.execute(select(Document).where(Document.id.in_(doc_ids)))).scalars().all()
+        for d in docs:
             events.append({"type": "document", "subtype": d.status.value,
                            "date": d.created_at.isoformat() if d.created_at else None,
                            "title": d.title, "detail": d.description, "id": str(d.id)})
@@ -167,55 +168,91 @@ async def test_webhook(hook_id: UUID, p: WebhookTest, background: BackgroundTask
     return {"queued": True}
 
 async def _deliver_webhook(hook_id: str, event: str, payload_json: str):
-    from app.database import async_session
-    try:
-        import httpx
-    except Exception:
-        httpx = None  # type: ignore
-    async with async_session() as db:
-        w = await db.get(Webhook, UUID(hook_id))
-        if not w or not w.is_active: return
-        status_code = None; error = None
-        if httpx is None:
-            error = "httpx not installed"
-        else:
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    r = await client.post(w.url, content=payload_json, headers={
-                        "Content-Type": "application/json",
-                        "X-Webhook-Event": event,
-                        "X-Webhook-Signature": hashlib.sha256((w.secret or "").encode() + payload_json.encode()).hexdigest(),
-                    })
-                    status_code = r.status_code
-            except Exception as e:
-                error = str(e)[:1000]
-        db.add(WebhookDelivery(webhook_id=w.id, event=event, payload=payload_json, status_code=status_code, error=error))
-        await db.commit()
+    """Queue + deliver a webhook with HMAC signing and retry scheduling.
+    Thin shim over `app.services.webhooks.queue_delivery` so existing callers
+    keep working without changes."""
+    from app.services.webhooks import queue_delivery
+    await queue_delivery(hook_id, event, payload_json)
 
 @router.get("/webhooks/{hook_id}/deliveries")
 async def list_deliveries(hook_id: UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(WebhookDelivery).where(WebhookDelivery.webhook_id == hook_id).order_by(WebhookDelivery.created_at.desc()).limit(50))
-    return [{"id": str(d.id), "event": d.event, "status_code": d.status_code, "error": d.error, "created_at": d.created_at.isoformat() if d.created_at else None} for d in result.scalars().all()]
+    return [{
+        "id": str(d.id), "event": d.event, "status_code": d.status_code, "error": d.error,
+        "attempts": d.attempts, "next_attempt_at": d.next_attempt_at.isoformat() if d.next_attempt_at else None,
+        "delivered_at": d.delivered_at.isoformat() if d.delivered_at else None,
+        "created_at": d.created_at.isoformat() if d.created_at else None,
+    } for d in result.scalars().all()]
+
+
+@router.post("/webhooks/deliveries/{delivery_id}/retry", dependencies=[Depends(require_permission("admin.webhook.manage"))])
+async def retry_delivery(delivery_id: UUID, db: AsyncSession = Depends(get_db)):
+    """Force-requeue a delivery by setting next_attempt_at=now. The sweeper
+    picks it up on its next tick (or within a minute)."""
+    d = await db.get(WebhookDelivery, delivery_id)
+    if not d:
+        raise HTTPException(404, "Not found")
+    d.next_attempt_at = datetime.utcnow()
+    await db.commit()
+    return {"requeued": True}
 
 
 # ── API Keys ────────────────────────────────────────────────────────
 
 class ApiKeyCreate(BaseModel):
     name: str
+    # Space/comma-separated or list form. Canonicalised to comma-separated.
+    scopes: str | list[str] = ""
+
+class ApiKeyUpdate(BaseModel):
+    scopes: str | list[str] | None = None
+    is_active: bool | None = None
+
+
+def _normalize_scopes(scopes: str | list[str] | None) -> str:
+    if not scopes:
+        return ""
+    if isinstance(scopes, list):
+        items = scopes
+    else:
+        items = [p for p in scopes.replace(",", " ").split() if p]
+    # de-dupe while preserving order
+    seen: dict[str, None] = {}
+    for s in items:
+        seen[s.strip()] = None
+    return ",".join(k for k in seen.keys() if k)
+
 
 @router.get("/api-keys")
 async def list_api_keys(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ApiKey).order_by(ApiKey.created_at.desc()))
-    return [{"id": str(k.id), "name": k.name, "prefix": k.prefix, "is_active": k.is_active, "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None} for k in result.scalars().all()]
+    return [{
+        "id": str(k.id), "name": k.name, "prefix": k.prefix, "is_active": k.is_active,
+        "scopes": [s for s in k.scopes.split(",") if s],
+        "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
+    } for k in result.scalars().all()]
 
 @router.post("/api-keys", status_code=201, dependencies=[Depends(require_permission("admin.apikey.manage"))])
 async def create_api_key(p: ApiKeyCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     raw = secrets.token_urlsafe(32)
     prefix = raw[:8]
     key_hash = hashlib.sha256(raw.encode()).hexdigest()
-    k = ApiKey(name=p.name, prefix=prefix, key_hash=key_hash, owner_id=current_user.id)
+    k = ApiKey(name=p.name, prefix=prefix, key_hash=key_hash, owner_id=current_user.id,
+               scopes=_normalize_scopes(p.scopes))
     db.add(k); await db.commit(); await db.refresh(k)
-    return {"id": str(k.id), "api_key": f"{prefix}.{raw}", "warning": "Save this now — it will not be shown again"}
+    return {"id": str(k.id), "api_key": f"{prefix}.{raw}", "scopes": [s for s in k.scopes.split(",") if s],
+            "warning": "Save this now — it will not be shown again"}
+
+@router.patch("/api-keys/{key_id}", dependencies=[Depends(require_permission("admin.apikey.manage"))])
+async def update_api_key(key_id: UUID, p: ApiKeyUpdate, db: AsyncSession = Depends(get_db)):
+    k = await db.get(ApiKey, key_id)
+    if not k: raise HTTPException(404, "Not found")
+    if p.scopes is not None:
+        k.scopes = _normalize_scopes(p.scopes)
+    if p.is_active is not None:
+        k.is_active = p.is_active
+    await db.commit()
+    return {"id": str(k.id), "scopes": [s for s in k.scopes.split(",") if s], "is_active": k.is_active}
 
 @router.delete("/api-keys/{key_id}", status_code=204, dependencies=[Depends(require_permission("admin.apikey.manage"))])
 async def revoke_api_key(key_id: UUID, db: AsyncSession = Depends(get_db)):
@@ -390,21 +427,7 @@ async def create_sso(p: SsoProviderCreate, db: AsyncSession = Depends(get_db)):
     db.add(prov); await db.commit(); await db.refresh(prov)
     return {"id": str(prov.id)}
 
-@router.get("/sso/authorize/{provider_id}")
-async def sso_authorize(provider_id: UUID, db: AsyncSession = Depends(get_db)):
-    """Returns the IdP authorize URL (stub — full SSO requires OIDC/SAML library integration)."""
-    p = await db.get(SsoProvider, provider_id)
-    if not p: raise HTTPException(404, "Not found")
-    if p.provider_type == SsoProviderType.OIDC:
-        url = f"{p.issuer_url or ''}/authorize?client_id={p.client_id}&redirect_uri=/sso/callback&response_type=code"
-    else:
-        url = p.metadata_xml_url or ""
-    return {"authorize_url": url, "note": "This is a stub; real SSO requires OIDC/SAML library wiring."}
-
-@router.post("/sso/callback/{provider_id}")
-async def sso_callback(provider_id: UUID, code: str | None = None, db: AsyncSession = Depends(get_db)):
-    """Stub callback — returns a placeholder. Production needs token exchange + user provisioning."""
-    return {"provider_id": str(provider_id), "code_received": bool(code), "note": "Stub callback; no real token exchange performed."}
+# SSO authorize / callback now live in app/routers/sso.py (#48)
 
 
 # ── Workspaces (stub multi-tenancy) ─────────────────────────────────
@@ -440,6 +463,8 @@ async def create_workspace(p: WorkspaceCreate, current_user: User = Depends(get_
 
 @router.post("/workspaces/{ws_id}/members", status_code=201, dependencies=[Depends(require_permission("admin.workspace.manage"))])
 async def add_workspace_member(ws_id: UUID, p: WorkspaceMemberAdd, db: AsyncSession = Depends(get_db)):
+    from app.services.plans import check_can_add_member
+    await check_can_add_member(db, ws_id)
     m = WorkspaceMember(workspace_id=ws_id, user_id=p.user_id, role=p.role)
     db.add(m); await db.commit(); await db.refresh(m)
     return {"id": str(m.id)}

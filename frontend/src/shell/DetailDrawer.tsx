@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "./icons";
+import TagPicker from "./TagPicker";
 
 export type DrawerTabKey = "overview" | "activity" | "comments" | "attachments" | "history";
 
@@ -136,6 +137,9 @@ export default function DetailDrawer() {
             <Icon.Close size={16} />
           </button>
         </header>
+        <div className="detail-drawer-tags">
+          <TagPicker entityType={parsed.entity} entityId={parsed.id} compact />
+        </div>
         {availableTabs.length > 1 && (
           <div className="detail-drawer-tabs" role="tablist">
             {availableTabs.map((t) => (

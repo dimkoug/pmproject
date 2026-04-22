@@ -48,6 +48,10 @@ celery.conf.update(
         "run_expiry_reminders_task": {"queue": "reports"},
         "run_retention_task": {"queue": "reports"},
         "send_email_task": {"queue": "reports"},
+        "purge_old_audit_task": {"queue": "reports"},
+        "pg_backup_task": {"queue": "reports"},
+        "purge_old_backups_task": {"queue": "reports"},
+        "retry_webhook_deliveries_task": {"queue": "default"},
     },
     # Celery Beat schedule — nightly housekeeping.
     beat_schedule={
@@ -60,6 +64,24 @@ celery.conf.update(
             "task": "run_retention_task",
             "schedule": crontab(minute=0, hour=2),   # 02:00 UTC daily
         },
+        "purge-old-audit": {
+            "task": "purge_old_audit_task",
+            "schedule": crontab(minute=15, hour=3),  # 03:15 UTC daily (#21)
+        },
+        "pg-backup": {
+            "task": "pg_backup_task",
+            "schedule": crontab(minute=0, hour=0),   # 00:00 UTC daily (#23)
+        },
+        "purge-old-backups": {
+            "task": "purge_old_backups_task",
+            "schedule": crontab(minute=30, hour=0),  # 00:30 UTC daily
+        },
+        # Webhook retry sweeper (#8) — every minute. Cheap: a single indexed
+        # query against webhook_deliveries where next_attempt_at <= now.
+        "retry-webhook-deliveries": {
+            "task": "retry_webhook_deliveries_task",
+            "schedule": 60.0,
+        },
     },
 )
 
@@ -68,3 +90,4 @@ celery.autodiscover_tasks(["app"])
 # Explicit import so the task module is registered on worker startup
 import app.tasks_dms  # noqa: F401, E402
 import app.services.email  # noqa: F401, E402  (registers send_email_task)
+import app.tasks_ops  # noqa: F401, E402  (registers audit purge, backup, backup-purge tasks)

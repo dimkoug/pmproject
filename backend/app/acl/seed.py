@@ -11,7 +11,7 @@ from sqlalchemy import delete, select, text
 
 from app.acl.catalog import CATALOG, DEFAULT_GROUPS
 from app.database import async_session
-from app.models.acl import Group, Permission, group_permissions
+from app.models.acl import FieldMask, Group, Permission, group_permissions
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,23 @@ async def seed_acl() -> None:
                 await db.execute(
                     group_permissions.insert().values(group_id=group.id, permission_id=p.id)
                 )
+
+        # 3. Seed default field-mask presets (idempotent — keyed on (codename, entity_type))
+        DEFAULT_FIELD_MASKS = [
+            ("acl.unmask.finance_sensitive", "company", ["annual_revenue"], "Hide company revenue from non-finance users"),
+            ("acl.unmask.finance_sensitive", "lead", ["estimated_value"], "Hide lead deal size from non-finance users"),
+            ("acl.unmask.finance_sensitive", "contact", ["phone", "email"], "Hide contact phone & email from non-finance users"),
+            ("acl.unmask.finance_sensitive", "employee", ["phone", "email"], "Hide employee personal contact info from non-finance users"),
+        ]
+        existing_masks = {
+            (m.unmask_codename, m.entity_type): m
+            for m in (await db.scalars(select(FieldMask))).all()
+        }
+        for code, entity_type, fields, desc in DEFAULT_FIELD_MASKS:
+            key = (code, entity_type)
+            if key in existing_masks:
+                continue  # User may have edited; don't overwrite
+            db.add(FieldMask(unmask_codename=code, entity_type=entity_type, fields=fields, description=desc))
 
         await db.commit()
     logger.info("ACL seeded: %d permissions, %d system groups", len(CATALOG), len(DEFAULT_GROUPS))

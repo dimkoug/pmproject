@@ -6,6 +6,7 @@ import {
 import { Icon } from "./icons";
 import { SkeletonLine } from "./Skeleton";
 import EmptyState from "./EmptyState";
+import { useFormat } from "../i18n/format";
 
 export function CommentsTab({
   targetType,
@@ -17,6 +18,7 @@ export function CommentsTab({
   const { data: comments = [], isLoading, refetch } = useGetCommentsQuery({ targetType, targetId });
   const [createComment, { isLoading: posting }] = useCreateCommentMutation();
   const [draft, setDraft] = useState("");
+  const { formatDateTime } = useFormat();
 
   const submit = async () => {
     const body = draft.trim();
@@ -54,7 +56,7 @@ export function CommentsTab({
             <li key={c.id} className="drawer-comment">
               <div className="drawer-comment-meta">
                 <strong>{c.author_name || "Someone"}</strong>
-                <span>{c.created_at ? new Date(c.created_at).toLocaleString() : ""}</span>
+                <span>{formatDateTime(c.created_at)}</span>
               </div>
               <div className="drawer-comment-body">{c.body}</div>
             </li>
@@ -90,6 +92,7 @@ export function ActivityTab({
   items: { id?: string; kind?: string; label?: string; at?: string; actor?: string }[];
   isLoading?: boolean;
 }) {
+  const { formatDateTime } = useFormat();
   if (isLoading) {
     return (
       <div>
@@ -124,7 +127,7 @@ export function ActivityTab({
             <div className="drawer-activity-label">{it.label ?? it.kind ?? "Event"}</div>
             <div className="drawer-activity-meta">
               {it.actor ? `${it.actor} · ` : ""}
-              {it.at ? new Date(it.at).toLocaleString() : ""}
+              {it.at ? formatDateTime(it.at) : ""}
             </div>
           </div>
         </li>

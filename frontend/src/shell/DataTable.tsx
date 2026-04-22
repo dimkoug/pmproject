@@ -33,6 +33,11 @@ export type DataTableProps<T> = {
   rowKey?: (row: T, index: number) => string;
   className?: string;
   skeletonRows?: number;
+  /** Renders inside the toolbar whenever at least one row is selected. The
+   * function gets the current selected rows and a `clear()` helper. */
+  bulkActions?: (selected: T[], clear: () => void) => ReactNode;
+  /** Persist table state (page size, sort, global filter) under this key. */
+  stateStorageKey?: string;
 };
 
 export default function DataTable<T>({
@@ -52,10 +57,24 @@ export default function DataTable<T>({
   rowKey,
   className,
   skeletonRows = 6,
+  bulkActions,
+  stateStorageKey,
 }: DataTableProps<T>) {
-  const [sorting, setSorting] = useState<SortingState>([]);
+  // Persisted state hydration — page size, sort, global search filter. Guarded
+  // by try/catch so a corrupt localStorage entry never crashes the table.
+  const persisted = useMemo(() => {
+    if (!stateStorageKey || typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(`dt:${stateStorageKey}`);
+      return raw ? JSON.parse(raw) as { sorting?: SortingState; globalFilter?: string; pageSize?: number } : null;
+    } catch {
+      return null;
+    }
+  }, [stateStorageKey]);
+
+  const [sorting, setSorting] = useState<SortingState>(persisted?.sorting ?? []);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
-  const [globalFilter, setGlobalFilter] = useState("");
+  const [globalFilter, setGlobalFilter] = useState(persisted?.globalFilter ?? "");
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
 
   const resolvedColumns = useMemo<ColumnDef<T, any>[]>(() => {
@@ -110,8 +129,26 @@ export default function DataTable<T>({
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    initialState: { pagination: { pageSize: defaultPageSize } },
+    initialState: { pagination: { pageSize: persisted?.pageSize ?? defaultPageSize } },
   });
+
+  // Persist state back to localStorage on each change (debounce not needed —
+  // these are user-driven events, not per-keystroke animations).
+  if (stateStorageKey && typeof window !== "undefined") {
+    try {
+      const snap = JSON.stringify({
+        sorting, globalFilter,
+        pageSize: table.getState().pagination.pageSize,
+      });
+      window.localStorage.setItem(`dt:${stateStorageKey}`, snap);
+    } catch { /* quota / privacy mode */ }
+  }
+
+  const selectedRows = useMemo(
+    () => data.filter((_, i) => rowSelection[String(i)]),
+    [data, rowSelection],
+  );
+  const clearSelection = () => setRowSelection({});
 
   const rows = table.getRowModel().rows;
   const totalRows = table.getFilteredRowModel().rows.length;
@@ -119,20 +156,42 @@ export default function DataTable<T>({
   const firstRow = totalRows === 0 ? 0 : pageIndex * pageSize + 1;
   const lastRow = Math.min((pageIndex + 1) * pageSize, totalRows);
 
+  const hasSelection = selectedRows.length > 0;
+
   return (
     <div className={`data-table ${className ?? ""}`}>
-      {globalSearch && (
+      {(globalSearch || (hasSelection && bulkActions)) && (
         <div className="data-table-toolbar">
-          <div className="data-table-search">
-            <Icon.Search size={14} aria-hidden />
-            <input
-              type="search"
-              value={globalFilter}
-              onChange={(e) => setGlobalFilter(e.target.value)}
-              placeholder={searchPlaceholder}
-              aria-label="Search table"
-            />
-          </div>
+          {globalSearch && (
+            <div className="data-table-search">
+              <Icon.Search size={14} aria-hidden />
+              <input
+                type="search"
+                value={globalFilter}
+                onChange={(e) => setGlobalFilter(e.target.value)}
+                placeholder={searchPlaceholder}
+                aria-label="Search table"
+              />
+            </div>
+          )}
+          {hasSelection && bulkActions && (
+            <div className="data-table-bulk" role="toolbar" aria-label="Bulk actions">
+              <span className="data-table-bulk-count">
+                {selectedRows.length} selected
+              </span>
+              <div className="data-table-bulk-actions">
+                {bulkActions(selectedRows, clearSelection)}
+              </div>
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost"
+                onClick={clearSelection}
+                aria-label="Clear selection"
+              >
+                Clear
+              </button>
+            </div>
+          )}
         </div>
       )}
       <div className="data-table-scroll">

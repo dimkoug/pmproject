@@ -51,6 +51,7 @@ export const APPS: AppDef[] = [
         { to: "/sales/leads", label: "Leads" },
         { to: "/sales/opportunities", label: "Opportunities" },
         { to: "/sales/quotes", label: "Quotes" },
+        { to: "/sales/orders", label: "Sales Orders" },
         { to: "/sales/contracts", label: "Contracts" },
       ]},
       { title: "Engagement", items: [
@@ -88,17 +89,24 @@ export const APPS: AppDef[] = [
       { title: "Payables", items: [
         { to: "/finance/expenses", label: "Expenses" },
         { to: "/finance/vendors", label: "Vendors" },
-        { to: "/finance/purchase-orders", label: "Purchase Orders" },
+        { to: "/finance/rfqs", label: "RFQs" },
         { to: "/finance/requisitions", label: "Requisitions" },
+        { to: "/finance/purchase-orders", label: "Purchase Orders" },
+        { to: "/finance/goods-receipts", label: "Goods Receipts" },
       ]},
       { title: "Ledger", items: [
         { to: "/finance/accounts", label: "Chart of Accounts" },
+        { to: "/finance/centers", label: "Cost / Profit Centers" },
         { to: "/finance/journal", label: "Journal" },
         { to: "/finance/bank", label: "Bank" },
+        { to: "/finance/reconciliation", label: "Reconciliation" },
         { to: "/finance/trial-balance", label: "Trial Balance" },
       ]},
       { title: "Operations", items: [
         { to: "/finance/inventory", label: "Inventory" },
+        { to: "/finance/batches", label: "Batches / Lots" },
+        { to: "/finance/serials", label: "Serial Numbers" },
+        { to: "/finance/shipments", label: "Shipments" },
         { to: "/finance/assets", label: "Assets" },
         { to: "/finance/depreciation", label: "Depreciation" },
         { to: "/finance/budgets", label: "Budgets" },
@@ -122,6 +130,7 @@ export const APPS: AppDef[] = [
     groups: [
       { title: "Library", items: [
         { to: "/documents", label: "Files", end: true },
+        { to: "/documents/qa", label: "Q&A / Search" },
         { to: "/documents/signatures", label: "Signatures" },
         { to: "/documents/templates", label: "Templates" },
         { to: "/documents/workflows", label: "Workflows" },
@@ -147,13 +156,28 @@ export const APPS: AppDef[] = [
     groups: [
       { title: "Overview", items: [
         { to: "/admin", label: "Settings", end: true },
+        { to: "/admin/security", label: "Security" },
         { to: "/admin/activity", label: "Activity Log" },
+        { to: "/admin/trash", label: "Trash" },
       ]},
       { title: "Access Control", items: [
         { to: "/admin/acl/groups", label: "Groups" },
         { to: "/admin/acl/permissions", label: "Permissions" },
         { to: "/admin/acl/users", label: "Users" },
         { to: "/admin/acl/inspector", label: "Permission Inspector" },
+      ]},
+      { title: "Taxonomy", items: [
+        { to: "/admin/tags", label: "Tags" },
+      ]},
+      { title: "Automation", items: [
+        { to: "/admin/automation", label: "Rules" },
+      ]},
+      { title: "HR", items: [
+        { to: "/admin/hr", label: "Overview", end: true },
+        { to: "/admin/hr/employees", label: "Employees" },
+        { to: "/admin/hr/leave", label: "Leave" },
+        { to: "/admin/hr/attendance", label: "Attendance" },
+        { to: "/admin/hr/timesheets", label: "Timesheets" },
       ]},
     ],
   },

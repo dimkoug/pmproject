@@ -52,3 +52,21 @@ async def log_audit(
         # Don't commit here — let the caller's transaction batch it.
     except Exception:
         logger.warning("Audit log failed for %s/%s", domain, action, exc_info=True)
+    # Fire automation rules for the synthesised event "<entity_type>.<action>".
+    # Imported lazily to avoid a circular dependency between audit + automation.
+    try:
+        from app.services.automation import fire_event
+        await fire_event(
+            db,
+            event=f"{entity_type}.{action}",
+            payload={
+                "entity_type": entity_type,
+                "entity_id": str(entity_id) if entity_id is not None else None,
+                "actor_id": str(user.id) if user else None,
+                "before": before,
+                "after": after,
+            },
+            actor=user,
+        )
+    except Exception:
+        logger.warning("Automation evaluator failed for %s/%s", entity_type, action, exc_info=True)

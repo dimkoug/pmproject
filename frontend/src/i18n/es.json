@@ -1,0 +1,54 @@
+{
+  "common": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "create": "Crear",
+    "confirm": "Confirmar",
+    "close": "Cerrar",
+    "search": "Buscar",
+    "loading": "Cargando…",
+    "back": "Atrás",
+    "next": "Siguiente",
+    "previous": "Anterior",
+    "empty": "Todavía no hay nada aquí",
+    "yes": "Sí",
+    "no": "No",
+    "required": "Obligatorio",
+    "optional": "Opcional",
+    "signOut": "Cerrar sesión",
+    "signIn": "Iniciar sesión"
+  },
+  "shell": {
+    "searchEverywhere": "Buscar en todo…",
+    "searchThisProject": "Buscar en este proyecto…",
+    "notifications": "Notificaciones",
+    "noNotifications": "Estás al día.",
+    "markAllRead": "Marcar todo como leído",
+    "density": "Densidad",
+    "densityComfortable": "Cómoda",
+    "densityCompact": "Compacta",
+    "language": "Idioma",
+    "timezone": "Zona horaria",
+    "workspaceSettings": "Configuración del espacio de trabajo",
+    "keyboardShortcuts": "Atajos de teclado",
+    "lightMode": "Modo claro",
+    "darkMode": "Modo oscuro",
+    "apps": "Aplicaciones",
+    "live": "En vivo",
+    "offline": "Sin conexión"
+  },
+  "apps": {
+    "projects": "Proyectos",
+    "sales": "Ventas",
+    "finance": "Finanzas",
+    "documents": "Documentos",
+    "admin": "Administración"
+  },
+  "nav": {
+    "dashboard": "Panel",
+    "overview": "Resumen",
+    "reports": "Informes"
+  }
+}

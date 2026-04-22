@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import Select from "react-select";
+import AiPlanModal from "../components/AiPlanModal";
+import { Icon } from "../shell/icons";
+import { notifyUser } from "../shell/modalService";
 import BoardContainer from "../components/dnd/BoardContainer";
 import BoardColumn from "../components/dnd/BoardColumn";
 import DraggableCard from "../components/dnd/DraggableCard";
@@ -46,6 +49,7 @@ export default function TasksPage() {
   const [showForm, setShowForm] = useState(false);
   const [editTask, setEditTask] = useState<any>(null);
   const [view, setView] = useState<"board" | "list">("board");
+  const [aiOpen, setAiOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [addPredId, setAddPredId] = useState("");
   const [addDepType, setAddDepType] = useState("finish_to_start");
@@ -138,6 +142,9 @@ export default function TasksPage() {
         <div style={{ display: "flex", gap: "0.5rem" }}>
           <button className={`btn ${view === "board" ? "btn-primary" : ""}`} onClick={() => setView("board")}>Board</button>
           <button className={`btn ${view === "list" ? "btn-primary" : ""}`} onClick={() => setView("list")}>List</button>
+          <button className="btn" onClick={() => setAiOpen(true)} title="Generate WBS from a project brief">
+            <Icon.Zap size={14} /> AI plan
+          </button>
           <button className="btn btn-primary" onClick={() => setShowForm(true)}>+ Add Task</button>
         </div>
       </div>
@@ -567,6 +574,19 @@ export default function TasksPage() {
             </table>
           </div>
         </div>
+      )}
+      {projectId && (
+        <AiPlanModal
+          open={aiOpen}
+          projectId={projectId}
+          onClose={() => setAiOpen(false)}
+          onCommitted={async (created) => {
+            await notifyUser({
+              title: "AI plan applied",
+              description: `Added ${created.tasks} tasks · ${created.milestones} milestones · ${created.risks} risks · ${created.deliverables} deliverables.`,
+            });
+          }}
+        />
       )}
     </div>
   );

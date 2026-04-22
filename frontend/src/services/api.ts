@@ -12,6 +12,11 @@ export const apiSlice = createApi({
       if (token) {
         headers.set("Authorization", `Bearer ${token}`);
       }
+      // #46 active workspace — picked up server-side via get_active_workspace_id
+      const workspaceId = typeof localStorage !== "undefined" ? localStorage.getItem("activeWorkspaceId") : null;
+      if (workspaceId) {
+        headers.set("X-Workspace-Id", workspaceId);
+      }
       return headers;
     },
   }),
@@ -25,6 +30,17 @@ export const apiSlice = createApi({
     "Measurement",
     "ChangeRequest",
     "Dashboard",
+    "Tag",
+    "TagLink",
+    "AutomationRule",
+    "Employee",
+    "LeaveRequest",
+    "Attendance",
+    "Timesheet",
+    "CostCenter",
+    "ProfitCenter",
+    "Shipment",
+    "Workspace",
   ],
   endpoints: (builder) => ({
     // Projects
@@ -190,6 +206,24 @@ export const apiSlice = createApi({
     }),
     getMe: builder.query<any, void>({
       query: () => "/auth/me",
+    }),
+    updateMeSettings: builder.mutation<any, { timezone?: string; language?: string; phone?: string | null; notify_email?: boolean; notify_sms?: boolean }>({
+      query: (body) => ({ url: "/auth/me/settings", method: "PATCH", body }),
+    }),
+    totpEnroll: builder.mutation<{ secret: string; provisioning_uri: string }, void>({
+      query: () => ({ url: "/auth/totp/enroll", method: "POST" }),
+    }),
+    getActiveSsoProviders: builder.query<any[], void>({
+      query: () => "/sso/active",
+    }),
+    totpConfirm: builder.mutation<any, { code: string }>({
+      query: (body) => ({ url: "/auth/totp/confirm", method: "POST", body }),
+    }),
+    totpDisable: builder.mutation<any, { password: string; code: string }>({
+      query: (body) => ({ url: "/auth/totp/disable", method: "POST", body }),
+    }),
+    getMyFieldMasks: builder.query<Record<string, string[]>, void>({
+      query: () => "/me/field-masks",
     }),
 
     // Schedule - Dependencies
@@ -514,6 +548,15 @@ export const apiSlice = createApi({
     getBankTransactions: builder.query<any[], void>({ query: () => "/erp/bank-transactions" }),
     createBankTransaction: builder.mutation<any, any>({ query: (b) => ({ url: "/erp/bank-transactions", method: "POST", body: b }) }),
     autoMatchBank: builder.mutation<any, void>({ query: () => ({ url: "/erp/bank-transactions/auto-match", method: "POST" }) }),
+    matchBankTxn: builder.mutation<any, { id: string; body: { invoice_id?: string; expense_id?: string; journal_entry_id?: string } }>({
+      query: ({ id, body }) => ({ url: `/erp/bank-transactions/${id}/match`, method: "POST", body }),
+    }),
+    unmatchBankTxn: builder.mutation<any, string>({
+      query: (id) => ({ url: `/erp/bank-transactions/${id}/match`, method: "DELETE" }),
+    }),
+    createJournalFromBankTxn: builder.mutation<any, { id: string; body: any }>({
+      query: ({ id, body }) => ({ url: `/erp/bank-transactions/${id}/create-journal`, method: "POST", body }),
+    }),
 
     // ── CRM extensions ──
     getForecast: builder.query<any, void>({ query: () => "/crm/forecast" }),
@@ -614,6 +657,377 @@ export const apiSlice = createApi({
     }),
     convertRequisition: builder.mutation<any, { id: string; body: any }>({
       query: ({ id, body }) => ({ url: `/erp/requisitions/${id}/convert`, method: "POST", body }),
+    }),
+
+    // ── Sales Orders ──
+    getSalesOrders: builder.query<any[], { status?: string; companyId?: string } | void>({
+      query: (p) => {
+        const q = new URLSearchParams();
+        if (p?.status) q.set("status", p.status);
+        if (p?.companyId) q.set("company_id", p.companyId);
+        const qs = q.toString();
+        return `/erp/sales-orders${qs ? `?${qs}` : ""}`;
+      },
+    }),
+    getSalesOrder: builder.query<any, string>({
+      query: (id) => `/erp/sales-orders/${id}`,
+    }),
+    createSalesOrder: builder.mutation<any, any>({
+      query: (b) => ({ url: "/erp/sales-orders", method: "POST", body: b }),
+    }),
+    createSalesOrderFromQuote: builder.mutation<any, { quoteId: string; orderNumber?: string }>({
+      query: ({ quoteId, orderNumber }) => ({
+        url: `/erp/sales-orders/from-quote/${quoteId}${orderNumber ? `?order_number=${encodeURIComponent(orderNumber)}` : ""}`,
+        method: "POST",
+      }),
+    }),
+    updateSalesOrderStatus: builder.mutation<any, { id: string; status: string }>({
+      query: ({ id, status }) => ({ url: `/erp/sales-orders/${id}/status`, method: "PATCH", body: { status } }),
+    }),
+    invoiceSalesOrder: builder.mutation<any, { id: string; invoiceNumber?: string }>({
+      query: ({ id, invoiceNumber }) => ({
+        url: `/erp/sales-orders/${id}/invoice${invoiceNumber ? `?invoice_number=${encodeURIComponent(invoiceNumber)}` : ""}`,
+        method: "POST",
+      }),
+    }),
+
+    // ── Purchase Order lines (for GRN) ──
+    getPurchaseOrder: builder.query<any, string>({
+      query: (id) => `/erp/purchase-orders/${id}`,
+    }),
+    addPurchaseOrderLine: builder.mutation<any, { poId: string; body: any }>({
+      query: ({ poId, body }) => ({ url: `/erp/purchase-orders/${poId}/lines`, method: "POST", body }),
+    }),
+
+    // ── Goods Receipts (GRN) ──
+    getGoodsReceipts: builder.query<any[], { poId?: string; status?: string } | void>({
+      query: (p) => {
+        const q = new URLSearchParams();
+        if (p?.poId) q.set("po_id", p.poId);
+        if (p?.status) q.set("status", p.status);
+        const qs = q.toString();
+        return `/erp/goods-receipts${qs ? `?${qs}` : ""}`;
+      },
+    }),
+    getGoodsReceipt: builder.query<any, string>({
+      query: (id) => `/erp/goods-receipts/${id}`,
+    }),
+    createGoodsReceipt: builder.mutation<any, any>({
+      query: (b) => ({ url: "/erp/goods-receipts", method: "POST", body: b }),
+    }),
+    confirmGoodsReceipt: builder.mutation<any, string>({
+      query: (id) => ({ url: `/erp/goods-receipts/${id}/confirm`, method: "POST" }),
+    }),
+
+    // ── RFQs / Supplier Quotes ──
+    getRfqs: builder.query<any[], string | void>({
+      query: (status) => `/erp/rfqs${status ? `?status=${status}` : ""}`,
+    }),
+    getRfq: builder.query<any, string>({
+      query: (id) => `/erp/rfqs/${id}`,
+    }),
+    createRfq: builder.mutation<any, any>({
+      query: (b) => ({ url: "/erp/rfqs", method: "POST", body: b }),
+    }),
+    sendRfq: builder.mutation<any, string>({
+      query: (id) => ({ url: `/erp/rfqs/${id}/send`, method: "POST" }),
+    }),
+    getSupplierQuotes: builder.query<any[], string>({
+      query: (rfqId) => `/erp/rfqs/${rfqId}/quotes`,
+    }),
+    submitSupplierQuote: builder.mutation<any, { rfqId: string; body: any }>({
+      query: ({ rfqId, body }) => ({ url: `/erp/rfqs/${rfqId}/quotes`, method: "POST", body }),
+    }),
+    awardRfq: builder.mutation<any, { rfqId: string; body: any }>({
+      query: ({ rfqId, body }) => ({ url: `/erp/rfqs/${rfqId}/award`, method: "POST", body }),
+    }),
+
+    // ── Batches / Serials (Bundle B) ──
+    updateProductTracking: builder.mutation<any, { productId: string; body: any }>({
+      query: ({ productId, body }) => ({ url: `/erp/products/${productId}/tracking`, method: "PATCH", body }),
+    }),
+    getBatches: builder.query<any[], { productId?: string; warehouseId?: string; expiringWithinDays?: number } | void>({
+      query: (p) => {
+        const q = new URLSearchParams();
+        if (p?.productId) q.set("product_id", p.productId);
+        if (p?.warehouseId) q.set("warehouse_id", p.warehouseId);
+        if (p?.expiringWithinDays !== undefined) q.set("expiring_within_days", String(p.expiringWithinDays));
+        const qs = q.toString();
+        return `/erp/batches${qs ? `?${qs}` : ""}`;
+      },
+    }),
+    getExpiringBatches: builder.query<any[], number | void>({
+      query: (days) => `/erp/batches/expiring-soon${days ? `?within_days=${days}` : ""}`,
+    }),
+    createBatch: builder.mutation<any, any>({
+      query: (b) => ({ url: "/erp/batches", method: "POST", body: b }),
+    }),
+    adjustBatch: builder.mutation<any, { id: string; body: any }>({
+      query: ({ id, body }) => ({ url: `/erp/batches/${id}/adjust`, method: "POST", body }),
+    }),
+    getSerials: builder.query<any[], { productId?: string; status?: string; warehouseId?: string } | void>({
+      query: (p) => {
+        const q = new URLSearchParams();
+        if (p?.productId) q.set("product_id", p.productId);
+        if (p?.status) q.set("status", p.status);
+        if (p?.warehouseId) q.set("warehouse_id", p.warehouseId);
+        const qs = q.toString();
+        return `/erp/serials${qs ? `?${qs}` : ""}`;
+      },
+    }),
+    createSerial: builder.mutation<any, any>({
+      query: (b) => ({ url: "/erp/serials", method: "POST", body: b }),
+    }),
+    updateSerial: builder.mutation<any, { id: string; body: any }>({
+      query: ({ id, body }) => ({ url: `/erp/serials/${id}`, method: "PATCH", body }),
+    }),
+
+    // ── Tags (Bundle B) ──
+    getTags: builder.query<any[], void>({
+      query: () => "/tags",
+      providesTags: ["Tag" as any],
+    }),
+    createTag: builder.mutation<any, any>({
+      query: (b) => ({ url: "/tags", method: "POST", body: b }),
+      invalidatesTags: ["Tag" as any],
+    }),
+    updateTag: builder.mutation<any, { id: string; body: any }>({
+      query: ({ id, body }) => ({ url: `/tags/${id}`, method: "PATCH", body }),
+      invalidatesTags: ["Tag" as any],
+    }),
+    deleteTag: builder.mutation<void, string>({
+      query: (id) => ({ url: `/tags/${id}`, method: "DELETE" }),
+      invalidatesTags: ["Tag" as any],
+    }),
+    getTagsForEntity: builder.query<any[], { entityType: string; entityId: string }>({
+      query: ({ entityType, entityId }) => `/tags/for?entity_type=${encodeURIComponent(entityType)}&entity_id=${entityId}`,
+      providesTags: (_r, _e, arg) => [{ type: "TagLink" as any, id: `${arg.entityType}:${arg.entityId}` }],
+    }),
+    attachTag: builder.mutation<any, { tagId: string; entityType: string; entityId: string }>({
+      query: ({ tagId, entityType, entityId }) => ({
+        url: `/tags/${tagId}/attach`,
+        method: "POST",
+        body: { entity_type: entityType, entity_id: entityId },
+      }),
+      invalidatesTags: (_r, _e, arg) => [{ type: "TagLink" as any, id: `${arg.entityType}:${arg.entityId}` }],
+    }),
+    detachTag: builder.mutation<void, { tagId: string; entityType: string; entityId: string }>({
+      query: ({ tagId, entityType, entityId }) => ({
+        url: `/tags/${tagId}/detach?entity_type=${encodeURIComponent(entityType)}&entity_id=${entityId}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: (_r, _e, arg) => [{ type: "TagLink" as any, id: `${arg.entityType}:${arg.entityId}` }],
+    }),
+
+    // ── Automation rules (Bundle D) ──
+    getAutomationCatalog: builder.query<any, void>({
+      query: () => "/automation/catalog",
+    }),
+    getAutomationRules: builder.query<any[], void>({
+      query: () => "/automation/rules",
+      providesTags: ["AutomationRule" as any],
+    }),
+    createAutomationRule: builder.mutation<any, any>({
+      query: (b) => ({ url: "/automation/rules", method: "POST", body: b }),
+      invalidatesTags: ["AutomationRule" as any],
+    }),
+    updateAutomationRule: builder.mutation<any, { id: string; body: any }>({
+      query: ({ id, body }) => ({ url: `/automation/rules/${id}`, method: "PATCH", body }),
+      invalidatesTags: ["AutomationRule" as any],
+    }),
+    deleteAutomationRule: builder.mutation<void, string>({
+      query: (id) => ({ url: `/automation/rules/${id}`, method: "DELETE" }),
+      invalidatesTags: ["AutomationRule" as any],
+    }),
+    testAutomationRule: builder.mutation<any, { id: string; payload: any }>({
+      query: ({ id, payload }) => ({ url: `/automation/rules/${id}/test`, method: "POST", body: { payload } }),
+    }),
+    getAutomationRuns: builder.query<any[], { ruleId?: string } | void>({
+      query: (p) => `/automation/runs${p?.ruleId ? `?rule_id=${p.ruleId}` : ""}`,
+    }),
+
+    // ── HR (Bundle E) ──
+    getHrDashboard: builder.query<any, void>({ query: () => "/hr/dashboard" }),
+    getEmployees: builder.query<any[], { department?: string; active?: boolean } | void>({
+      query: (p) => {
+        const q = new URLSearchParams();
+        if (p?.department) q.set("department", p.department);
+        if (p?.active !== undefined) q.set("active", String(p.active));
+        const qs = q.toString();
+        return `/hr/employees${qs ? `?${qs}` : ""}`;
+      },
+      providesTags: ["Employee" as any],
+    }),
+    getMyEmployee: builder.query<any, void>({ query: () => "/hr/employees/me" }),
+    createEmployee: builder.mutation<any, any>({
+      query: (b) => ({ url: "/hr/employees", method: "POST", body: b }),
+      invalidatesTags: ["Employee" as any],
+    }),
+    updateEmployee: builder.mutation<any, { id: string; body: any }>({
+      query: ({ id, body }) => ({ url: `/hr/employees/${id}`, method: "PATCH", body }),
+      invalidatesTags: ["Employee" as any],
+    }),
+    deleteEmployee: builder.mutation<void, string>({
+      query: (id) => ({ url: `/hr/employees/${id}`, method: "DELETE" }),
+      invalidatesTags: ["Employee" as any],
+    }),
+    getLeaveRequests: builder.query<any[], { status?: string; employeeId?: string } | void>({
+      query: (p) => {
+        const q = new URLSearchParams();
+        if (p?.status) q.set("status", p.status);
+        if (p?.employeeId) q.set("employee_id", p.employeeId);
+        const qs = q.toString();
+        return `/hr/leave-requests${qs ? `?${qs}` : ""}`;
+      },
+      providesTags: ["LeaveRequest" as any],
+    }),
+    createLeaveRequest: builder.mutation<any, any>({
+      query: (b) => ({ url: "/hr/leave-requests", method: "POST", body: b }),
+      invalidatesTags: ["LeaveRequest" as any],
+    }),
+    decideLeaveRequest: builder.mutation<any, { id: string; body: any }>({
+      query: ({ id, body }) => ({ url: `/hr/leave-requests/${id}/decide`, method: "POST", body }),
+      invalidatesTags: ["LeaveRequest" as any],
+    }),
+    getAttendance: builder.query<any[], { employeeId?: string; dateFrom?: string; dateTo?: string } | void>({
+      query: (p) => {
+        const q = new URLSearchParams();
+        if (p?.employeeId) q.set("employee_id", p.employeeId);
+        if (p?.dateFrom) q.set("date_from", p.dateFrom);
+        if (p?.dateTo) q.set("date_to", p.dateTo);
+        const qs = q.toString();
+        return `/hr/attendance${qs ? `?${qs}` : ""}`;
+      },
+      providesTags: ["Attendance" as any],
+    }),
+    createAttendance: builder.mutation<any, any>({
+      query: (b) => ({ url: "/hr/attendance", method: "POST", body: b }),
+      invalidatesTags: ["Attendance" as any],
+    }),
+    checkIn: builder.mutation<any, void>({
+      query: () => ({ url: "/hr/attendance/check-in", method: "POST" }),
+      invalidatesTags: ["Attendance" as any],
+    }),
+    checkOut: builder.mutation<any, void>({
+      query: () => ({ url: "/hr/attendance/check-out", method: "POST" }),
+      invalidatesTags: ["Attendance" as any],
+    }),
+    getMyTimesheets: builder.query<any[], void>({
+      query: () => "/hr/timesheets/me",
+      providesTags: ["Timesheet" as any],
+    }),
+    getTimesheetInbox: builder.query<any[], void>({
+      query: () => "/hr/timesheets/inbox",
+      providesTags: ["Timesheet" as any],
+    }),
+    createOrGetTimesheet: builder.mutation<any, { week_start: string }>({
+      query: (b) => ({ url: "/hr/timesheets", method: "POST", body: b }),
+      invalidatesTags: ["Timesheet" as any],
+    }),
+    submitTimesheet: builder.mutation<any, string>({
+      query: (id) => ({ url: `/hr/timesheets/${id}/submit`, method: "POST" }),
+      invalidatesTags: ["Timesheet" as any],
+    }),
+    decideTimesheet: builder.mutation<any, { id: string; decision: "approved" | "rejected"; note?: string | null }>({
+      query: ({ id, decision, note }) => ({
+        url: `/hr/timesheets/${id}/decide`,
+        method: "POST",
+        body: { decision, note },
+      }),
+      invalidatesTags: ["Timesheet" as any],
+    }),
+
+    // ── Cost / Profit centers (Tier 2 #78) ──
+    getCostCenters: builder.query<any[], void>({ query: () => "/erp/cost-centers", providesTags: ["CostCenter" as any] }),
+    createCostCenter: builder.mutation<any, any>({
+      query: (b) => ({ url: "/erp/cost-centers", method: "POST", body: b }),
+      invalidatesTags: ["CostCenter" as any],
+    }),
+    deactivateCostCenter: builder.mutation<void, string>({
+      query: (id) => ({ url: `/erp/cost-centers/${id}`, method: "DELETE" }),
+      invalidatesTags: ["CostCenter" as any],
+    }),
+    getProfitCenters: builder.query<any[], void>({ query: () => "/erp/profit-centers", providesTags: ["ProfitCenter" as any] }),
+    createProfitCenter: builder.mutation<any, any>({
+      query: (b) => ({ url: "/erp/profit-centers", method: "POST", body: b }),
+      invalidatesTags: ["ProfitCenter" as any],
+    }),
+    deactivateProfitCenter: builder.mutation<void, string>({
+      query: (id) => ({ url: `/erp/profit-centers/${id}`, method: "DELETE" }),
+      invalidatesTags: ["ProfitCenter" as any],
+    }),
+    getCenterPnl: builder.query<any[], "cost" | "profit">({
+      query: (by) => `/erp/reports/center-pnl?by=${by}`,
+    }),
+    createInvoiceCheckoutSession: builder.mutation<{ url: string; session_id: string }, string>({
+      query: (invoiceId) => ({ url: `/erp/invoices/${invoiceId}/checkout-session`, method: "POST" }),
+    }),
+
+    createPortalMagicLink: builder.mutation<{ url: string; expires_at: string; company_name: string }, { company_id: string; label?: string; expires_in_hours?: number }>({
+      query: (b) => ({ url: "/admin/portal/magic-link", method: "POST", body: b }),
+    }),
+
+    // ── Shipping (#75) ──
+    getCarriers: builder.query<{ value: string; label: string }[], void>({
+      query: () => "/shipping/carriers",
+    }),
+    getShipments: builder.query<any[], { salesOrderId?: string; invoiceId?: string; status?: string } | void>({
+      query: (p) => {
+        const q = new URLSearchParams();
+        if (p?.salesOrderId) q.set("sales_order_id", p.salesOrderId);
+        if (p?.invoiceId) q.set("invoice_id", p.invoiceId);
+        if (p?.status) q.set("status", p.status);
+        const qs = q.toString();
+        return `/shipping/shipments${qs ? `?${qs}` : ""}`;
+      },
+      providesTags: ["Shipment" as any],
+    }),
+    createShipment: builder.mutation<any, any>({
+      query: (b) => ({ url: "/shipping/shipments", method: "POST", body: b }),
+      invalidatesTags: ["Shipment" as any],
+    }),
+    updateShipmentStatus: builder.mutation<any, { id: string; body: any }>({
+      query: ({ id, body }) => ({ url: `/shipping/shipments/${id}/status`, method: "PATCH", body }),
+      invalidatesTags: ["Shipment" as any],
+    }),
+
+    // ── AI plan generation (#52) ──
+    startAiPlan: builder.mutation<{ task_id: string; status: string }, { projectId: string; brief: string }>({
+      query: ({ projectId, brief }) => ({
+        url: `/projects/${projectId}/ai-plan/start`,
+        method: "POST",
+        body: { brief },
+      }),
+    }),
+    commitAiPlan: builder.mutation<any, { projectId: string; plan: any }>({
+      query: ({ projectId, plan }) => ({
+        url: `/projects/${projectId}/ai-plan/commit`,
+        method: "POST",
+        body: plan,
+      }),
+    }),
+    getCeleryTaskResult: builder.query<any, string>({
+      query: (taskId) => `/celery-tasks/${taskId}`,
+    }),
+
+    // ── Semantic search (#49) ──
+    rebuildEmbeddings: builder.mutation<any, { documentId?: string } | void>({
+      query: (p) => ({
+        url: `/dms/embeddings/rebuild${p?.documentId ? `?document_id=${p.documentId}` : ""}`,
+        method: "POST",
+      }),
+    }),
+    semanticSearch: builder.query<any[], { q: string; topK?: number }>({
+      query: ({ q, topK }) => `/dms/search/semantic?q=${encodeURIComponent(q)}${topK ? `&top_k=${topK}` : ""}`,
+    }),
+    docQa: builder.mutation<any, { question: string; top_k?: number }>({
+      query: (b) => ({ url: "/dms/qa", method: "POST", body: b }),
+    }),
+
+    // ── Workspaces (#46) ──
+    getMyWorkspaces: builder.query<any[], void>({
+      query: () => "/me/workspaces",
+      providesTags: ["Workspace" as any],
     }),
 
     // ── CRM v2 ──
@@ -798,6 +1212,12 @@ export const {
   useSignupMutation,
   useLoginMutation,
   useGetMeQuery,
+  useUpdateMeSettingsMutation,
+  useTotpEnrollMutation,
+  useTotpConfirmMutation,
+  useTotpDisableMutation,
+  useGetMyFieldMasksQuery,
+  useGetActiveSsoProvidersQuery,
   useGetDependenciesQuery,
   useCreateDependencyMutation,
   useDeleteDependencyMutation,
@@ -909,6 +1329,9 @@ export const {
   useGetBankTransactionsQuery,
   useCreateBankTransactionMutation,
   useAutoMatchBankMutation,
+  useMatchBankTxnMutation,
+  useUnmatchBankTxnMutation,
+  useCreateJournalFromBankTxnMutation,
   // CRM extensions
   useGetForecastQuery,
   useScoreLeadMutation,
@@ -972,6 +1395,95 @@ export const {
   useCreateRequisitionMutation,
   useUpdateRequisitionStatusMutation,
   useConvertRequisitionMutation,
+  // Sales Orders (Bundle A)
+  useGetSalesOrdersQuery,
+  useGetSalesOrderQuery,
+  useCreateSalesOrderMutation,
+  useCreateSalesOrderFromQuoteMutation,
+  useUpdateSalesOrderStatusMutation,
+  useInvoiceSalesOrderMutation,
+  // PO + GRN (Bundle A)
+  useGetPurchaseOrderQuery,
+  useAddPurchaseOrderLineMutation,
+  useGetGoodsReceiptsQuery,
+  useGetGoodsReceiptQuery,
+  useCreateGoodsReceiptMutation,
+  useConfirmGoodsReceiptMutation,
+  // RFQ (Bundle A)
+  useGetRfqsQuery,
+  useGetRfqQuery,
+  useCreateRfqMutation,
+  useSendRfqMutation,
+  useGetSupplierQuotesQuery,
+  useSubmitSupplierQuoteMutation,
+  useAwardRfqMutation,
+  // Batches / Serials (Bundle B)
+  useUpdateProductTrackingMutation,
+  useGetBatchesQuery,
+  useGetExpiringBatchesQuery,
+  useCreateBatchMutation,
+  useAdjustBatchMutation,
+  useGetSerialsQuery,
+  useCreateSerialMutation,
+  useUpdateSerialMutation,
+  // Tags (Bundle B)
+  useGetTagsQuery,
+  useCreateTagMutation,
+  useUpdateTagMutation,
+  useDeleteTagMutation,
+  useGetTagsForEntityQuery,
+  useAttachTagMutation,
+  useDetachTagMutation,
+  // Automation (Bundle D)
+  useGetAutomationCatalogQuery,
+  useGetAutomationRulesQuery,
+  useCreateAutomationRuleMutation,
+  useUpdateAutomationRuleMutation,
+  useDeleteAutomationRuleMutation,
+  useTestAutomationRuleMutation,
+  useGetAutomationRunsQuery,
+  // HR (Bundle E)
+  useGetHrDashboardQuery,
+  useGetEmployeesQuery,
+  useGetMyEmployeeQuery,
+  useCreateEmployeeMutation,
+  useUpdateEmployeeMutation,
+  useDeleteEmployeeMutation,
+  useGetLeaveRequestsQuery,
+  useCreateLeaveRequestMutation,
+  useDecideLeaveRequestMutation,
+  useGetAttendanceQuery,
+  useCreateAttendanceMutation,
+  useCheckInMutation,
+  useCheckOutMutation,
+  useGetMyTimesheetsQuery,
+  useGetTimesheetInboxQuery,
+  useCreateOrGetTimesheetMutation,
+  useSubmitTimesheetMutation,
+  useDecideTimesheetMutation,
+  // Cost / profit centers (Tier 2 #78)
+  useGetCostCentersQuery,
+  useCreateCostCenterMutation,
+  useDeactivateCostCenterMutation,
+  useGetProfitCentersQuery,
+  useCreateProfitCenterMutation,
+  useDeactivateProfitCenterMutation,
+  useGetCenterPnlQuery,
+  useCreateInvoiceCheckoutSessionMutation,
+  useCreatePortalMagicLinkMutation,
+  // Shipping (Tier 2 #75)
+  useGetCarriersQuery,
+  useGetShipmentsQuery,
+  useCreateShipmentMutation,
+  useUpdateShipmentStatusMutation,
+  useStartAiPlanMutation,
+  useCommitAiPlanMutation,
+  useGetCeleryTaskResultQuery,
+  useRebuildEmbeddingsMutation,
+  useSemanticSearchQuery,
+  useDocQaMutation,
+  useLazySemanticSearchQuery,
+  useGetMyWorkspacesQuery,
   // CRM v2
   useGetEmailsQuery,
   useIngestEmailMutation,

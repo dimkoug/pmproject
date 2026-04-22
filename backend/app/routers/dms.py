@@ -7,7 +7,7 @@ import uuid as uuid_mod
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
@@ -132,8 +132,12 @@ class FolderCreate(BaseModel):
     project_id: UUID | None = None; parent_id: UUID | None = None; name: str; description: str | None = None
 
 @router.get("/folders")
-async def list_folders(project_id: UUID | None = None, parent_id: UUID | None = None, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def list_folders(request: Request, project_id: UUID | None = None, parent_id: UUID | None = None, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services.workspaces import get_active_workspace_id
     q = select(Folder).order_by(Folder.name)
+    ws_id = await get_active_workspace_id(request, current_user, db)
+    if ws_id is not None:
+        q = q.where((Folder.workspace_id == ws_id) | (Folder.workspace_id.is_(None)))
     if project_id: q = q.where(Folder.project_id == project_id)
     if parent_id: q = q.where(Folder.parent_id == parent_id)
     else: q = q.where(Folder.parent_id.is_(None))
@@ -153,8 +157,10 @@ async def list_folders(project_id: UUID | None = None, parent_id: UUID | None = 
     return folders
 
 @router.post("/folders", status_code=201, dependencies=[Depends(require_permission("documents.folder.manage"))])
-async def create_folder(p: FolderCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    f = Folder(project_id=p.project_id, parent_id=p.parent_id, name=p.name, description=p.description, created_by_id=current_user.id)
+async def create_folder(p: FolderCreate, request: Request, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services.workspaces import get_active_workspace_id
+    ws_id = await get_active_workspace_id(request, current_user, db)
+    f = Folder(project_id=p.project_id, parent_id=p.parent_id, name=p.name, description=p.description, created_by_id=current_user.id, workspace_id=ws_id)
     db.add(f); await db.commit(); await db.refresh(f)
     return {"id": str(f.id), "name": f.name}
 
@@ -195,6 +201,7 @@ async def list_documents(
 
 @router.post("/documents", status_code=201, dependencies=[Depends(require_permission("documents.file.upload"))])
 async def create_document(
+    request: Request,
     file: UploadFile = File(...),
     title: str = Form(...),
     project_id: str = Form(None),
@@ -205,6 +212,14 @@ async def create_document(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # Read first so we know the size for the plan-storage check
+    content = await file.read()
+    from app.services.workspaces import get_active_workspace_id
+    ws_id = await get_active_workspace_id(request, current_user, db)
+    if ws_id is not None:
+        from app.services.plans import check_can_upload
+        await check_can_upload(db, ws_id, len(content))
+
     # Create document record
     doc = Document(
         project_id=UUID(project_id) if project_id and project_id != "null" else None,
@@ -219,7 +234,6 @@ async def create_document(
     file_id = str(uuid_mod.uuid4())
     ext = os.path.splitext(file.filename or "")[1]
     stored_name = f"{file_id}{ext}"
-    content = await file.read()
     get_storage().put(stored_name, content)
 
     ver = DocumentVersion(
@@ -642,11 +656,23 @@ async def list_entity_links(entity_type: EntityType | None = None, entity_id: UU
     if entity_id: q = q.where(EntityLink.entity_id == entity_id)
     if document_id: q = q.where(EntityLink.document_id == document_id)
     result = await db.execute(q)
-    links = []
-    for l in result.scalars().all():
-        d = await db.get(Document, l.document_id)
-        links.append({"id": str(l.id), "document_id": str(l.document_id), "document_title": d.title if d else None, "entity_type": l.entity_type.value, "entity_id": str(l.entity_id)})
-    return links
+    rows = result.scalars().all()
+    if not rows:
+        return []
+    # Batch-load documents to avoid N+1 db.get() calls inside the loop.
+    doc_ids = {l.document_id for l in rows}
+    docs_result = await db.execute(select(Document).where(Document.id.in_(doc_ids)))
+    titles = {d.id: d.title for d in docs_result.scalars().all()}
+    return [
+        {
+            "id": str(l.id),
+            "document_id": str(l.document_id),
+            "document_title": titles.get(l.document_id),
+            "entity_type": l.entity_type.value,
+            "entity_id": str(l.entity_id),
+        }
+        for l in rows
+    ]
 
 @router.post("/entity-links", status_code=201)
 async def create_entity_link(p: EntityLinkCreate, db: AsyncSession = Depends(get_db)):

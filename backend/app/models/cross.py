@@ -69,6 +69,9 @@ class WebhookDelivery(Base):
     payload: Mapped[str] = mapped_column(Text)
     status_code: Mapped[int | None] = mapped_column(Integer)
     error: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -83,6 +86,10 @@ class ApiKey(Base):
     key_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     owner_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Comma-separated scope list, e.g. "read:projects,write:tasks". Empty string
+    # (the default) grants no permissions — callers must assign scopes explicitly
+    # so a leaked key with no scopes is harmless.
+    scopes: Mapped[str] = mapped_column(String(2000), default="", nullable=False)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -200,6 +207,12 @@ class Workspace(Base):
     slug: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     owner_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     plan: Mapped[str] = mapped_column(String(50), default="free")
+    # Per-workspace quotas. Defaults come from plan definitions in
+    # app/services/plans.py — these columns let ops override for any
+    # one tenant without redeploying.
+    max_users: Mapped[int | None] = mapped_column(Integer)
+    max_projects: Mapped[int | None] = mapped_column(Integer)
+    max_storage_mb: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
