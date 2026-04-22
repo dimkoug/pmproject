@@ -1,6 +1,7 @@
 import { useGetHealthQuery, useComputeHealthMutation } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import { notifyUser } from "../../shell/modalService";
 
 export default function HealthPage() {
   const { data: health = [], refetch } = useGetHealthQuery();
@@ -15,7 +16,7 @@ export default function HealthPage() {
             key: "compute", label: "Compute snapshots", variant: "primary",
             onClick: async () => {
               const r: any = await computeHealth();
-              alert(`Created ${r.data?.snapshots || 0} snapshots`);
+              await notifyUser({ title: "Snapshots computed", description: `Created ${r.data?.snapshots || 0} snapshots` });
               refetch();
             },
           },

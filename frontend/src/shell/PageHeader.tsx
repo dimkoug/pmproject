@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { Icon } from "./icons";
 
 export type Crumb = { to?: string; label: string };
 
@@ -19,7 +20,11 @@ export default function PageHeader({ title, subtitle, breadcrumbs, actions, meta
           {breadcrumbs.map((c, i) => (
             <span key={i} className="page-breadcrumb">
               {c.to ? <Link to={c.to}>{c.label}</Link> : <span>{c.label}</span>}
-              {i < breadcrumbs.length - 1 && <span className="page-breadcrumb-sep" aria-hidden>›</span>}
+              {i < breadcrumbs.length - 1 && (
+                <span className="page-breadcrumb-sep" aria-hidden>
+                  <Icon.ChevronRight size={12} />
+                </span>
+              )}
             </span>
           ))}
         </nav>

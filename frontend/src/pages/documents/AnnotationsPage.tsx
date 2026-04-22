@@ -4,6 +4,7 @@ import {
 } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import { promptForValues } from "../../shell/modalService";
 
 export default function AnnotationsPage() {
   const [docId, setDocId] = useState<string | null>(null);
@@ -20,8 +21,16 @@ export default function AnnotationsPage() {
             key: "comment", label: "Add comment", variant: "primary",
             disabled: !docId,
             onClick: async () => {
-              const body = prompt("Comment:"); if (!body || !docId) return;
-              await createAnn({ document_id: docId, body });
+              if (!docId) return;
+              const v = await promptForValues({
+                title: "Add comment",
+                submitLabel: "Add",
+                fields: [
+                  { name: "body", label: "Comment", kind: "textarea", required: true },
+                ],
+              });
+              if (!v) return;
+              await createAnn({ document_id: docId, body: v.body });
               refetch();
             },
           },

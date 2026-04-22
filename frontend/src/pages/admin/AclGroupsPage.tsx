@@ -9,6 +9,7 @@ import {
 } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import { promptForValues, confirmAction } from "../../shell/modalService";
 
 export default function AclGroupsPage() {
   const { data: groups = [], refetch: rGroups } = useGetAclGroupsQuery();
@@ -57,10 +58,16 @@ export default function AclGroupsPage() {
             label: "+ New group",
             variant: "primary",
             onClick: async () => {
-              const name = prompt("Group name:");
-              if (!name) return;
-              const description = prompt("Description (optional):") ?? undefined;
-              await createGroup({ name, description });
+              const v = await promptForValues({
+                title: "New group",
+                submitLabel: "Create",
+                fields: [
+                  { name: "name", label: "Group name", required: true },
+                  { name: "description", label: "Description", placeholder: "Optional" },
+                ],
+              });
+              if (!v) return;
+              await createGroup({ name: v.name, description: v.description || undefined });
               rGroups();
             },
           },
@@ -72,7 +79,13 @@ export default function AclGroupsPage() {
             title: current?.is_system ? "System groups cannot be deleted" : undefined,
             onClick: async () => {
               if (!current) return;
-              if (!confirm(`Delete group "${current.name}"?`)) return;
+              const ok = await confirmAction({
+                title: "Delete group?",
+                description: `Delete group "${current.name}"?`,
+                submitLabel: "Delete",
+                dangerous: true,
+              });
+              if (!ok) return;
               await deleteGroup(current.id);
               setSelected(null);
               rGroups();

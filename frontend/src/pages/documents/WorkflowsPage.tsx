@@ -3,6 +3,7 @@ import {
 } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import { promptForValues } from "../../shell/modalService";
 
 export default function WorkflowsPage() {
   const { data: workflows = [], refetch } = useGetWorkflowsQuery();
@@ -17,10 +18,17 @@ export default function WorkflowsPage() {
           {
             key: "new", label: "New workflow", variant: "primary",
             onClick: async () => {
-              const docId = prompt("Document ID:"); if (!docId) return;
-              const name = prompt("Workflow name:") || "Review";
+              const v = await promptForValues({
+                title: "New workflow",
+                submitLabel: "Create",
+                fields: [
+                  { name: "docId", label: "Document ID", required: true },
+                  { name: "name", label: "Workflow name", defaultValue: "Review" },
+                ],
+              });
+              if (!v) return;
               await createWorkflow({
-                document_id: docId, name, steps: [
+                document_id: v.docId, name: v.name || "Review", steps: [
                   { step_order: 0, role: "author" },
                   { step_order: 1, role: "reviewer" },
                   { step_order: 2, role: "approver" },
@@ -54,8 +62,15 @@ export default function WorkflowsPage() {
                   Approve step
                 </button>
                 <button className="btn btn-sm" onClick={async () => {
-                  const note = prompt("Reason:") || "";
-                  await advanceWorkflow({ id: w.id, body: { decision: "rejected", note } });
+                  const v = await promptForValues({
+                    title: "Reject step",
+                    submitLabel: "Reject",
+                    fields: [
+                      { name: "note", label: "Reason", kind: "textarea", placeholder: "Optional" },
+                    ],
+                  });
+                  if (!v) return;
+                  await advanceWorkflow({ id: w.id, body: { decision: "rejected", note: v.note || "" } });
                   refetch();
                 }}>Reject</button>
               </div>

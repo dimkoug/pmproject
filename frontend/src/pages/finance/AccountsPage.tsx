@@ -1,12 +1,51 @@
+import { useMemo } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { useGetAccountsQuery, useCreateAccountMutation } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import DataTable from "../../shell/DataTable";
+import { useDrawerPeek } from "../../shell/DetailDrawer";
+import { promptForValues } from "../../shell/modalService";
 
 const ACCOUNT_TYPES = ["asset", "liability", "equity", "revenue", "expense"];
 
+type Account = {
+  id: string;
+  code: string;
+  name: string;
+  account_type: string;
+  balance?: number;
+};
+
 export default function AccountsPage() {
-  const { data: accounts = [], refetch } = useGetAccountsQuery();
+  const { data: accounts = [], isLoading, refetch } = useGetAccountsQuery();
   const [createAccount] = useCreateAccountMutation();
+  const { open: openPeek } = useDrawerPeek();
+
+  const columns = useMemo<ColumnDef<Account, any>[]>(
+    () => [
+      {
+        accessorKey: "code",
+        header: "Code",
+        cell: (c) => <span style={{ fontWeight: 600 }}>{c.getValue() as string}</span>,
+      },
+      { accessorKey: "name", header: "Name" },
+      {
+        accessorKey: "account_type",
+        header: "Type",
+        cell: (c) => <span className="badge badge-blue">{c.getValue() as string}</span>,
+      },
+      {
+        accessorKey: "balance",
+        header: "Balance",
+        cell: (c) => {
+          const v = c.getValue() as number | undefined;
+          return `$${v?.toLocaleString() ?? 0}`;
+        },
+      },
+    ],
+    [],
+  );
 
   return (
     <div>
@@ -16,31 +55,33 @@ export default function AccountsPage() {
           {
             key: "new", label: "New account", variant: "primary",
             onClick: async () => {
-              const code = prompt("Code (e.g. 1000):"); if (!code) return;
-              const name = prompt("Name:"); if (!name) return;
-              const account_type = prompt(`Type (${ACCOUNT_TYPES.join("/")}):`, "asset") || "asset";
-              await createAccount({ code, name, account_type });
+              const v = await promptForValues({
+                title: "New account",
+                submitLabel: "Create",
+                fields: [
+                  { name: "code", label: "Code", placeholder: "e.g. 1000", required: true },
+                  { name: "name", label: "Name", required: true },
+                  {
+                    name: "account_type", label: "Type", kind: "select", required: true, defaultValue: "asset",
+                    options: ACCOUNT_TYPES.map((t) => ({ value: t, label: t })),
+                  },
+                ],
+              });
+              if (!v) return;
+              await createAccount({ code: v.code, name: v.name, account_type: v.account_type || "asset" });
               refetch();
             },
           },
         ]}
       />
-      <div className="card" style={{ padding: 0 }}>
-        <table>
-          <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Balance</th></tr></thead>
-          <tbody>
-            {accounts.map((a: any) => (
-              <tr key={a.id}>
-                <td style={{ fontWeight: 600 }}>{a.code}</td>
-                <td>{a.name}</td>
-                <td><span className="badge badge-blue">{a.account_type}</span></td>
-                <td>${a.balance?.toLocaleString()}</td>
-              </tr>
-            ))}
-            {accounts.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--gray-500)", padding: "1rem" }}>No accounts.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={accounts as Account[]}
+        isLoading={isLoading}
+        emptyTitle="No accounts yet"
+        emptyDescription="Create your chart of accounts to start posting journal entries."
+        onRowClick={(row) => openPeek("account", row.id)}
+      />
     </div>
   );
 }

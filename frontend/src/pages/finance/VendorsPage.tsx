@@ -1,11 +1,39 @@
+import { useMemo } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { useGetVendorsQuery, useCreateVendorMutation } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import DataTable from "../../shell/DataTable";
+import { useDrawerPeek } from "../../shell/DetailDrawer";
 import { downloadCsv } from "../../shell/csvExport";
+import { promptForValues } from "../../shell/modalService";
+
+type Vendor = {
+  id: string;
+  name: string;
+  contact_person?: string;
+  email?: string;
+  phone?: string;
+};
 
 export default function VendorsPage() {
-  const { data: vendors = [], refetch } = useGetVendorsQuery();
+  const { data: vendors = [], isLoading, refetch } = useGetVendorsQuery();
   const [createVendor] = useCreateVendorMutation();
+  const { open: openPeek } = useDrawerPeek();
+
+  const columns = useMemo<ColumnDef<Vendor, any>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: "Name",
+        cell: (c) => <span style={{ fontWeight: 500 }}>{c.getValue() as string}</span>,
+      },
+      { accessorKey: "contact_person", header: "Contact", cell: (c) => (c.getValue() as string) || "-" },
+      { accessorKey: "email", header: "Email", cell: (c) => (c.getValue() as string) || "-" },
+      { accessorKey: "phone", header: "Phone", cell: (c) => (c.getValue() as string) || "-" },
+    ],
+    [],
+  );
 
   return (
     <div>
@@ -15,30 +43,29 @@ export default function VendorsPage() {
           {
             key: "new", label: "New vendor", variant: "primary",
             onClick: async () => {
-              const name = prompt("Vendor name:"); if (!name) return;
-              await createVendor({ name });
+              const v = await promptForValues({
+                title: "New vendor",
+                submitLabel: "Create",
+                fields: [
+                  { name: "name", label: "Vendor name", required: true },
+                ],
+              });
+              if (!v) return;
+              await createVendor({ name: v.name });
               refetch();
             },
           },
           { key: "export", label: "Export CSV", onClick: () => downloadCsv("vendors") },
         ]}
       />
-      <div className="card" style={{ padding: 0 }}>
-        <table>
-          <thead><tr><th>Name</th><th>Contact</th><th>Email</th><th>Phone</th></tr></thead>
-          <tbody>
-            {vendors.map((v: any) => (
-              <tr key={v.id}>
-                <td style={{ fontWeight: 500 }}>{v.name}</td>
-                <td>{v.contact_person || "-"}</td>
-                <td>{v.email || "-"}</td>
-                <td>{v.phone || "-"}</td>
-              </tr>
-            ))}
-            {vendors.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--gray-500)", padding: "1rem" }}>No vendors.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={vendors as Vendor[]}
+        isLoading={isLoading}
+        emptyTitle="No vendors yet"
+        emptyDescription="Add your first vendor to start creating purchase orders."
+        onRowClick={(row) => openPeek("vendor", row.id)}
+      />
     </div>
   );
 }

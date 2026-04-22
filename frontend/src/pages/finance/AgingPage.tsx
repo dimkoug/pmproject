@@ -1,50 +1,104 @@
+import { useMemo } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { useGetInvoiceAgingQuery, useCreatePaymentMutation } from "../../services/api";
 import { useProjectContext } from "../../shell/useProjectContext";
 import PageHeader from "../../shell/PageHeader";
+import DataTable from "../../shell/DataTable";
+import { promptForValues } from "../../shell/modalService";
+
+type AgingRow = {
+  id: string;
+  invoice_number: string;
+  bucket: string;
+  due_date?: string;
+  outstanding?: number;
+};
 
 export default function AgingPage() {
   const projectId = useProjectContext();
-  const { data: aging, refetch } = useGetInvoiceAgingQuery(projectId);
+  const { data: aging, isLoading, refetch } = useGetInvoiceAgingQuery(projectId);
   const [createPayment] = useCreatePaymentMutation();
 
-  if (!aging) return <div>Loading…</div>;
+  const columns = useMemo<ColumnDef<AgingRow, any>[]>(
+    () => [
+      {
+        accessorKey: "invoice_number",
+        header: "Invoice",
+        cell: (c) => <span style={{ fontWeight: 500 }}>{c.getValue() as string}</span>,
+      },
+      {
+        accessorKey: "bucket",
+        header: "Bucket",
+        cell: (c) => <span className="badge badge-blue">{c.getValue() as string}</span>,
+      },
+      {
+        accessorKey: "due_date",
+        header: "Due",
+        cell: (c) => (c.getValue() as string) || "-",
+      },
+      {
+        accessorKey: "outstanding",
+        header: "Outstanding",
+        cell: (c) => {
+          const v = c.getValue() as number | undefined;
+          return <span style={{ fontWeight: 600 }}>${v?.toLocaleString()}</span>;
+        },
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        enableSorting: false,
+        cell: (c) => {
+          const i = c.row.original;
+          return (
+            <button
+              className="btn btn-sm"
+              onClick={async (e) => {
+                e.stopPropagation();
+                const v = await promptForValues({
+                  title: "Record payment",
+                  description: `Owed: $${i.outstanding}`,
+                  submitLabel: "Record",
+                  fields: [
+                    { name: "amount", label: "Payment amount", kind: "number", required: true, step: 0.01 },
+                  ],
+                });
+                if (!v) return;
+                const amt = parseFloat(v.amount || "0");
+                if (!amt) return;
+                await createPayment({ invoice_id: i.id, amount: amt });
+                refetch();
+              }}
+            >
+              Record payment
+            </button>
+          );
+        },
+      },
+    ],
+    [createPayment, refetch],
+  );
 
   return (
     <div>
       <PageHeader title="Invoice aging" subtitle="Outstanding receivables bucketed by days past due." />
       <div className="stats-grid" style={{ marginBottom: "1rem" }}>
-        {Object.entries(aging.buckets || {}).map(([k, v]: any) => (
+        {Object.entries(aging?.buckets || {}).map(([k, v]: any) => (
           <div key={k} className="stat-card">
             <div className="label">{k.replace(/_/g, "-")} days</div>
             <div className="value">${v?.toLocaleString()}</div>
           </div>
         ))}
       </div>
-      <div className="card">
-        <h3 style={{ marginBottom: "0.75rem" }}>Outstanding invoices</h3>
-        <table>
-          <thead><tr><th>Invoice</th><th>Bucket</th><th>Due</th><th>Outstanding</th><th>Actions</th></tr></thead>
-          <tbody>
-            {aging.invoices?.map((i: any) => (
-              <tr key={i.id}>
-                <td style={{ fontWeight: 500 }}>{i.invoice_number}</td>
-                <td><span className="badge badge-blue">{i.bucket}</span></td>
-                <td>{i.due_date || "-"}</td>
-                <td style={{ fontWeight: 600 }}>${i.outstanding?.toLocaleString()}</td>
-                <td>
-                  <button className="btn btn-sm" onClick={async () => {
-                    const amt = parseFloat(prompt(`Payment amount (owed: $${i.outstanding}):`) || "0");
-                    if (!amt) return;
-                    await createPayment({ invoice_id: i.id, amount: amt });
-                    refetch();
-                  }}>Record payment</button>
-                </td>
-              </tr>
-            ))}
-            {(!aging.invoices || aging.invoices.length === 0) && <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--gray-500)", padding: "1rem" }}>No outstanding invoices.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <h3 style={{ marginBottom: "0.75rem" }}>Outstanding invoices</h3>
+      {/* peek omitted — aggregated view */}
+      <DataTable
+        columns={columns}
+        data={(aging?.invoices ?? []) as AgingRow[]}
+        isLoading={isLoading}
+        emptyTitle="No outstanding invoices"
+        emptyDescription="All invoices are paid or within their terms."
+      />
     </div>
   );
 }

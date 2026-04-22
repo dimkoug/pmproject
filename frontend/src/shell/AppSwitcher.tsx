@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { APPS, AppDef } from "./navConfig";
+import { Icon } from "./icons";
 
 export default function AppSwitcher({ currentApp }: { currentApp: AppDef }) {
   const [open, setOpen] = useState(false);
@@ -24,9 +25,7 @@ export default function AppSwitcher({ currentApp }: { currentApp: AppDef }) {
         aria-expanded={open}
       >
         <span className="app-switcher-waffle">
-          <span /><span /><span />
-          <span /><span /><span />
-          <span /><span /><span />
+          <Icon.AppGrid size={18} aria-hidden />
         </span>
       </button>
 

@@ -1,10 +1,19 @@
 import { useMemo, useState } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { useGetAclPermissionsQuery } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
+import DataTable from "../../shell/DataTable";
+
+type Permission = {
+  id: string;
+  codename: string;
+  name: string;
+  category: string;
+  description?: string;
+};
 
 export default function AclPermissionsPage() {
-  const { data: permissions = [] } = useGetAclPermissionsQuery();
-  const [filter, setFilter] = useState("");
+  const { data: permissions = [], isLoading } = useGetAclPermissionsQuery();
   const [category, setCategory] = useState<string>("");
 
   const categories = useMemo(() => {
@@ -13,12 +22,32 @@ export default function AclPermissionsPage() {
     return Array.from(s).sort();
   }, [permissions]);
 
-  const filtered = permissions.filter((p: any) => {
-    if (category && p.category !== category) return false;
-    if (!filter) return true;
-    const q = filter.toLowerCase();
-    return p.codename.toLowerCase().includes(q) || p.name.toLowerCase().includes(q) || (p.description || "").toLowerCase().includes(q);
-  });
+  const filtered = useMemo<Permission[]>(
+    () => (category ? permissions.filter((p: any) => p.category === category) : permissions) as Permission[],
+    [category, permissions],
+  );
+
+  const columns = useMemo<ColumnDef<Permission, any>[]>(
+    () => [
+      {
+        accessorKey: "codename",
+        header: "Codename",
+        cell: (c) => <span style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>{c.getValue() as string}</span>,
+      },
+      { accessorKey: "name", header: "Name", cell: (c) => <span style={{ fontWeight: 500 }}>{c.getValue() as string}</span> },
+      {
+        accessorKey: "category",
+        header: "Category",
+        cell: (c) => <span className="badge badge-blue">{c.getValue() as string}</span>,
+      },
+      {
+        accessorKey: "description",
+        header: "Description",
+        cell: (c) => <span style={{ color: "var(--gray-500)", fontSize: "0.82rem" }}>{(c.getValue() as string) || "—"}</span>,
+      },
+    ],
+    [],
+  );
 
   return (
     <div>
@@ -28,42 +57,26 @@ export default function AclPermissionsPage() {
         breadcrumbs={[{ to: "/admin", label: "Admin" }, { label: "Permissions" }]}
       />
 
-      <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap" }}>
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter by codename / name / description…"
-          style={{ flex: 1, minWidth: 240, padding: "0.5rem 0.75rem", border: "1px solid var(--gray-200)", borderRadius: "var(--radius)", fontSize: "0.85rem" }}
-        />
-        <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ padding: "0.5rem 0.75rem", borderRadius: "var(--radius)" }}>
+      <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap", alignItems: "center" }}>
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          style={{ padding: "0.4rem 0.65rem", borderRadius: "var(--radius-sm)", border: "1px solid var(--gray-200)" }}
+        >
           <option value="">All categories</option>
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <span className="badge badge-gray" style={{ alignSelf: "center" }}>{filtered.length} / {permissions.length}</span>
+        <span className="badge badge-gray">{filtered.length} / {permissions.length}</span>
       </div>
 
-      <div className="card" style={{ padding: 0 }}>
-        <table>
-          <thead>
-            <tr>
-              <th>Codename</th>
-              <th>Name</th>
-              <th>Category</th>
-              <th>Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((p: any) => (
-              <tr key={p.id}>
-                <td style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>{p.codename}</td>
-                <td style={{ fontWeight: 500 }}>{p.name}</td>
-                <td><span className="badge badge-blue">{p.category}</span></td>
-                <td style={{ color: "var(--gray-500)", fontSize: "0.82rem" }}>{p.description || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={filtered}
+        isLoading={isLoading}
+        searchPlaceholder="Filter codename / name / description…"
+        emptyTitle="No permissions match"
+        emptyDescription="Try clearing the category filter."
+      />
     </div>
   );
 }

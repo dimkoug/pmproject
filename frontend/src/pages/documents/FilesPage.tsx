@@ -11,6 +11,8 @@ import {
 import { useProjectContext } from "../../shell/useProjectContext";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import { confirmAction, notifyUser } from "../../shell/modalService";
+import { Icon } from "../../shell/icons";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -245,8 +247,10 @@ export default function FilesPage() {
       {folders.length > 0 && (
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
           {folders.map((f: any) => (
-            <div key={f.id} style={{ padding: "0.75rem 1rem", background: "white", border: "1px solid var(--gray-200)", borderRadius: "var(--radius-lg)", display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 220 }} className="project-card">
-              <span style={{ fontSize: "1.3rem", cursor: "pointer" }} onClick={() => navigateToFolder(f.id, f.name)}>&#128193;</span>
+            <div key={f.id} style={{ padding: "0.75rem 1rem", border: "1px solid var(--gray-200)", borderRadius: "var(--radius-lg)", display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 220 }} className="card">
+              <span style={{ cursor: "pointer", color: "var(--gray-600)", display: "inline-flex" }} onClick={() => navigateToFolder(f.id, f.name)}>
+                <Icon.Folder size={20} />
+              </span>
               <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigateToFolder(f.id, f.name)}>
                 <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>{f.name}</div>
                 <div style={{ fontSize: "0.72rem", color: "var(--gray-500)" }}>{f.doc_count} docs, {f.subfolder_count} folders</div>
@@ -282,8 +286,8 @@ export default function FilesPage() {
                       <a href={`${API_URL}/api/dms/documents/${d.id}/download`} className="btn btn-sm btn-primary" style={{ textDecoration: "none", fontSize: "0.72rem" }} target="_blank" rel="noreferrer">Download</a>
                       <button className="btn btn-sm" onClick={() => setVersionDocId(versionDocId === d.id ? null : d.id)}>Versions</button>
                       <button className="btn btn-sm" onClick={() => setShareDocId(d.id)}>Share</button>
-                      <button className="btn btn-sm" onClick={async () => { try { await checkoutDoc({ id: d.id, body: {} }).unwrap(); alert("Checked out"); } catch (err: any) { alert(err?.data?.detail || "Failed"); } }}>Checkout</button>
-                      <button className="btn btn-sm" onClick={async () => { await checkinDoc(d.id); alert("Checked in"); }}>Check-in</button>
+                      <button className="btn btn-sm" onClick={async () => { try { await checkoutDoc({ id: d.id, body: {} }).unwrap(); await notifyUser({ title: "Checked out" }); } catch (err: any) { await notifyUser({ title: "Checkout failed", description: err?.data?.detail || "Failed" }); } }}>Checkout</button>
+                      <button className="btn btn-sm" onClick={async () => { await checkinDoc(d.id); await notifyUser({ title: "Checked in" }); }}>Check-in</button>
                     </div>
                   </td>
                 </tr>
@@ -312,7 +316,12 @@ export default function FilesPage() {
                     <a href={`${API_URL}/api/dms/documents/${versionDocId}/download?version=${v.version}`} className="btn btn-sm" style={{ textDecoration: "none", fontSize: "0.72rem" }} target="_blank" rel="noreferrer">Download</a>
                     {i !== 0 && (
                       <button className="btn btn-sm" onClick={async () => {
-                        if (!confirm(`Restore v${v.version} as the current version? This creates a new version copying its contents.`)) return;
+                        const ok = await confirmAction({
+                          title: `Restore v${v.version}?`,
+                          description: "This creates a new version copying the contents of the selected version.",
+                          submitLabel: "Restore",
+                        });
+                        if (!ok) return;
                         await restoreVersion({ docId: versionDocId, version: v.version });
                         rVersions(); rDocs();
                       }}>Restore</button>

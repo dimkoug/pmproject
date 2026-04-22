@@ -7,6 +7,7 @@ import DraggableCard from "../../components/dnd/DraggableCard";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
 import { downloadCsv } from "../../shell/csvExport";
+import { promptForValues } from "../../shell/modalService";
 
 const OPP_STAGES = ["prospecting", "qualification", "proposal", "negotiation", "closed_won", "closed_lost"];
 
@@ -23,10 +24,19 @@ export default function OpportunitiesPage() {
           {
             key: "new", label: "New opportunity", variant: "primary",
             onClick: async () => {
-              const title = prompt("Opportunity title:"); if (!title) return;
-              const amount = parseFloat(prompt("Amount:") || "0");
-              const probability = parseInt(prompt("Probability (0-100):") || "50");
-              await createOpp({ title, amount, probability });
+              const v = await promptForValues({
+                title: "New opportunity",
+                submitLabel: "Create",
+                fields: [
+                  { name: "title", label: "Opportunity title", required: true },
+                  { name: "amount", label: "Amount", kind: "number", step: 0.01 },
+                  { name: "probability", label: "Probability (0-100)", kind: "number", min: 0, max: 100, defaultValue: "50" },
+                ],
+              });
+              if (!v) return;
+              const amount = parseFloat(v.amount || "0");
+              const probability = parseInt(v.probability || "50");
+              await createOpp({ title: v.title, amount, probability });
               refetch();
             },
           },

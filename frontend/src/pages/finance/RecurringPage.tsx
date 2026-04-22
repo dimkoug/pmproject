@@ -1,13 +1,67 @@
+import { useMemo } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import {
   useGetRecurringInvoicesQuery, useCreateRecurringInvoiceMutation, useRunRecurringInvoicesMutation,
 } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import DataTable from "../../shell/DataTable";
+import { useDrawerPeek } from "../../shell/DetailDrawer";
+import { promptForValues, notifyUser } from "../../shell/modalService";
+
+type Recurring = {
+  id: string;
+  template_name: string;
+  amount?: number;
+  frequency: string;
+  next_run?: string;
+  is_active: boolean;
+};
 
 export default function RecurringPage() {
-  const { data: recurring = [], refetch } = useGetRecurringInvoicesQuery();
+  const { data: recurring = [], isLoading, refetch } = useGetRecurringInvoicesQuery();
   const [createRec] = useCreateRecurringInvoiceMutation();
   const [runRec] = useRunRecurringInvoicesMutation();
+  const { open: openPeek } = useDrawerPeek();
+
+  const columns = useMemo<ColumnDef<Recurring, any>[]>(
+    () => [
+      {
+        accessorKey: "template_name",
+        header: "Template",
+        cell: (c) => <span style={{ fontWeight: 500 }}>{c.getValue() as string}</span>,
+      },
+      {
+        accessorKey: "amount",
+        header: "Amount",
+        cell: (c) => {
+          const v = c.getValue() as number | undefined;
+          return `$${v?.toLocaleString() ?? 0}`;
+        },
+      },
+      {
+        accessorKey: "frequency",
+        header: "Frequency",
+        cell: (c) => <span className="badge badge-blue">{c.getValue() as string}</span>,
+      },
+      {
+        accessorKey: "next_run",
+        header: "Next run",
+        cell: (c) => (c.getValue() as string) || "-",
+      },
+      {
+        accessorKey: "is_active",
+        header: "Active",
+        cell: (c) =>
+          c.getValue() ? (
+            <span className="badge badge-green">Yes</span>
+          ) : (
+            <span className="badge badge-gray">No</span>
+          ),
+      },
+    ],
+    [],
+  );
 
   return (
     <div>
@@ -18,39 +72,50 @@ export default function RecurringPage() {
             key: "run", label: "Run due now",
             onClick: async () => {
               const r: any = await runRec();
-              alert(`Generated ${r.data?.count || 0}`);
+              await notifyUser({ title: "Recurring run complete", description: `Generated ${r.data?.count || 0}` });
               refetch();
             },
           },
           {
             key: "new", label: "New template", variant: "primary",
             onClick: async () => {
-              const template_name = prompt("Template name:"); if (!template_name) return;
-              const amount = parseFloat(prompt("Amount:") || "0");
-              const frequency = prompt("Frequency (weekly/monthly/quarterly/yearly):", "monthly") || "monthly";
-              await createRec({ template_name, amount, frequency });
+              const v = await promptForValues({
+                title: "New recurring template",
+                submitLabel: "Create",
+                fields: [
+                  { name: "template_name", label: "Template name", required: true },
+                  { name: "amount", label: "Amount", kind: "number", required: true, step: 0.01 },
+                  {
+                    name: "frequency", label: "Frequency", kind: "select", defaultValue: "monthly",
+                    options: [
+                      { value: "weekly", label: "Weekly" },
+                      { value: "monthly", label: "Monthly" },
+                      { value: "quarterly", label: "Quarterly" },
+                      { value: "yearly", label: "Yearly" },
+                    ],
+                  },
+                ],
+              });
+              if (!v) return;
+              const amount = parseFloat(v.amount || "0");
+              await createRec({
+                template_name: v.template_name,
+                amount,
+                frequency: v.frequency || "monthly",
+              });
               refetch();
             },
           },
         ]}
       />
-      <div className="card" style={{ padding: 0 }}>
-        <table>
-          <thead><tr><th>Template</th><th>Amount</th><th>Frequency</th><th>Next run</th><th>Active</th></tr></thead>
-          <tbody>
-            {recurring.map((r: any) => (
-              <tr key={r.id}>
-                <td style={{ fontWeight: 500 }}>{r.template_name}</td>
-                <td>${r.amount?.toLocaleString()}</td>
-                <td><span className="badge badge-blue">{r.frequency}</span></td>
-                <td>{r.next_run || "-"}</td>
-                <td>{r.is_active ? <span className="badge badge-green">Yes</span> : <span className="badge badge-gray">No</span>}</td>
-              </tr>
-            ))}
-            {recurring.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--gray-500)", padding: "1rem" }}>No templates.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={recurring as Recurring[]}
+        isLoading={isLoading}
+        emptyTitle="No recurring templates yet"
+        emptyDescription="Create a template to auto-generate invoices on a schedule."
+        onRowClick={(row) => openPeek("recurring-invoice", row.id)}
+      />
     </div>
   );
 }

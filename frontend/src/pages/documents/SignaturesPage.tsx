@@ -1,10 +1,65 @@
+import { useMemo } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { useGetSignaturesQuery, useCreateSignatureMutation } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import DataTable from "../../shell/DataTable";
+import { useDrawerPeek } from "../../shell/DetailDrawer";
+import { promptForValues } from "../../shell/modalService";
+
+type Signature = {
+  id: string;
+  signer_email: string;
+  document_id: string;
+  status: string;
+  signed_at?: string;
+  token?: string;
+};
 
 export default function SignaturesPage() {
-  const { data: sigs = [], refetch } = useGetSignaturesQuery();
+  const { data: sigs = [], isLoading, refetch } = useGetSignaturesQuery();
   const [createSig] = useCreateSignatureMutation();
+  const { open: openPeek } = useDrawerPeek();
+
+  const columns = useMemo<ColumnDef<Signature, any>[]>(
+    () => [
+      { accessorKey: "signer_email", header: "Signer" },
+      {
+        accessorKey: "document_id",
+        header: "Document",
+        cell: (c) => <span style={{ fontSize: "0.75rem" }}>{(c.getValue() as string).slice(0, 8)}…</span>,
+      },
+      {
+        accessorKey: "status",
+        header: "Status",
+        cell: (c) => {
+          const v = c.getValue() as string;
+          return (
+            <span className={`badge ${v === "signed" ? "badge-green" : v === "declined" ? "badge-red" : "badge-yellow"}`}>
+              {v}
+            </span>
+          );
+        },
+      },
+      {
+        accessorKey: "signed_at",
+        header: "Signed",
+        cell: (c) => {
+          const v = c.getValue() as string | undefined;
+          return v ? new Date(v).toLocaleDateString() : "-";
+        },
+      },
+      {
+        accessorKey: "token",
+        header: "Link",
+        cell: (c) => {
+          const v = c.getValue() as string | undefined;
+          return <span style={{ fontSize: "0.72rem", fontFamily: "monospace" }}>{v?.slice(0, 16)}…</span>;
+        },
+      },
+    ],
+    [],
+  );
 
   return (
     <div>
@@ -14,30 +69,29 @@ export default function SignaturesPage() {
           {
             key: "request", label: "Request signature", variant: "primary",
             onClick: async () => {
-              const docId = prompt("Document ID:");
-              const email = prompt("Signer email:");
-              if (docId && email) { await createSig({ document_id: docId, signer_email: email }); refetch(); }
+              const v = await promptForValues({
+                title: "Request signature",
+                submitLabel: "Send",
+                fields: [
+                  { name: "docId", label: "Document ID", required: true },
+                  { name: "email", label: "Signer email", kind: "email", required: true },
+                ],
+              });
+              if (!v) return;
+              await createSig({ document_id: v.docId, signer_email: v.email });
+              refetch();
             },
           },
         ]}
       />
-      <div className="card" style={{ padding: 0 }}>
-        <table>
-          <thead><tr><th>Signer</th><th>Document</th><th>Status</th><th>Signed</th><th>Link</th></tr></thead>
-          <tbody>
-            {sigs.map((s: any) => (
-              <tr key={s.id}>
-                <td>{s.signer_email}</td>
-                <td style={{ fontSize: "0.75rem" }}>{s.document_id.slice(0, 8)}…</td>
-                <td><span className={`badge ${s.status === "signed" ? "badge-green" : s.status === "declined" ? "badge-red" : "badge-yellow"}`}>{s.status}</span></td>
-                <td>{s.signed_at ? new Date(s.signed_at).toLocaleDateString() : "-"}</td>
-                <td style={{ fontSize: "0.72rem", fontFamily: "monospace" }}>{s.token?.slice(0, 16)}…</td>
-              </tr>
-            ))}
-            {sigs.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--gray-500)", padding: "1rem" }}>No signature requests.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={sigs as Signature[]}
+        isLoading={isLoading}
+        emptyTitle="No signature requests yet"
+        emptyDescription="Send your first document for signature to get started."
+        onRowClick={(row) => openPeek("signature", row.id)}
+      />
     </div>
   );
 }

@@ -1,5 +1,8 @@
 import { Outlet, useLocation } from "react-router-dom";
 import SuiteBar from "../shell/SuiteBar";
+import DetailDrawer from "../shell/DetailDrawer";
+import ModalHost from "../shell/modalService";
+import "../shell/drawerBodies";
 import { useProjectWebSocket } from "../services/useWebSocket";
 
 function ShellWsBridge() {
@@ -17,6 +20,8 @@ export default function SuiteShell() {
       <div className="suite-body">
         <Outlet />
       </div>
+      <DetailDrawer />
+      <ModalHost />
     </div>
   );
 }

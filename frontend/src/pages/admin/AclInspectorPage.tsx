@@ -6,6 +6,7 @@ import {
   useGetProjectsQuery,
 } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
+import { Icon } from "../../shell/icons";
 
 export default function AclInspectorPage() {
   const { data: users = [] } = useGetAdminUsersQuery();
@@ -68,9 +69,15 @@ export default function AclInspectorPage() {
           ) : result ? (
             <>
               <div style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "0.75rem" }}>
-                {result.allowed
-                  ? <span style={{ color: "var(--success)" }}>✓ Allowed</span>
-                  : <span style={{ color: "var(--danger)" }}>✗ Denied</span>}
+                {result.allowed ? (
+                  <span style={{ color: "var(--success)", display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
+                    <Icon.Check size={18} /> Allowed
+                  </span>
+                ) : (
+                  <span style={{ color: "var(--danger)", display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
+                    <Icon.Close size={18} /> Denied
+                  </span>
+                )}
                 <span style={{ fontFamily: "monospace", fontSize: "0.82rem", color: "var(--gray-500)", marginLeft: "0.75rem" }}>{result.codename}</span>
               </div>
               <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--gray-500)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "0.4rem" }}>

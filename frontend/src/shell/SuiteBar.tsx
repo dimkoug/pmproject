@@ -8,6 +8,9 @@ import {
 } from "../services/api";
 import AppSwitcher from "./AppSwitcher";
 import { getAppByPath } from "./navConfig";
+import { Icon } from "./icons";
+import { useHotkeys } from "./useHotkeys";
+import ShortcutsCheatsheet from "./ShortcutsCheatsheet";
 
 export default function SuiteBar() {
   const location = useLocation();
@@ -18,10 +21,40 @@ export default function SuiteBar() {
   const [userOpen, setUserOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(localStorage.getItem("dark") === "1");
+  const [density, setDensity] = useState<"comfortable" | "compact">(
+    (localStorage.getItem("density") as "comfortable" | "compact") || "comfortable",
+  );
   const [searchQ, setSearchQ] = useState("");
   const [searchFocus, setSearchFocus] = useState(false);
+  const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
   const userRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useHotkeys([
+    {
+      combo: "ctrl+k",
+      allowInInputs: true,
+      handler: (e) => {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      },
+    },
+    {
+      combo: "/",
+      handler: (e) => {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      },
+    },
+    {
+      combo: "shift+?",
+      handler: (e) => {
+        e.preventDefault();
+        setCheatsheetOpen(true);
+      },
+    },
+  ]);
 
   const { data: unreadData, refetch: refetchCount } = useGetUnreadCountQuery(undefined, { pollingInterval: 30_000 });
   const { data: notifications = [], refetch: refetchNotifs } = useGetNotificationsQuery(undefined, { skip: !notifOpen });
@@ -41,6 +74,11 @@ export default function SuiteBar() {
     document.documentElement.setAttribute("data-theme", darkMode ? "dark" : "light");
     localStorage.setItem("dark", darkMode ? "1" : "0");
   }, [darkMode]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-density", density);
+    localStorage.setItem("density", density);
+  }, [density]);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -83,16 +121,14 @@ export default function SuiteBar() {
 
       <div className="suite-bar-center">
         <div className={`suite-search ${searchFocus ? "focused" : ""}`}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="11" cy="11" r="7" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
+          <Icon.Search size={14} aria-hidden />
           <input
+            ref={searchInputRef}
             value={searchQ}
             onChange={(e) => setSearchQ(e.target.value)}
             onFocus={() => setSearchFocus(true)}
             onBlur={() => setTimeout(() => setSearchFocus(false), 150)}
-            placeholder={`Search${projectId ? " this project" : " everywhere"}…`}
+            placeholder={`Search${projectId ? " this project" : " everywhere"}…  (Ctrl+K)`}
           />
           {searchFocus && searchQ.length >= 2 && searchResults.length > 0 && (
             <div className="suite-search-panel">
@@ -119,10 +155,7 @@ export default function SuiteBar() {
             aria-label={`Notifications (${unreadCount} unread)`}
             onClick={() => setNotifOpen((x) => !x)}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-              <path d="M10 21a2 2 0 0 0 4 0" />
-            </svg>
+            <Icon.Bell aria-hidden />
             {unreadCount > 0 && <span className="suite-notif-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>}
           </button>
           {notifOpen && (
@@ -163,11 +196,7 @@ export default function SuiteBar() {
           )}
         </div>
         <button className="suite-icon-btn" title={darkMode ? "Light mode" : "Dark mode"} onClick={() => setDarkMode(!darkMode)}>
-          {darkMode ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" /></svg>
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
-          )}
+          {darkMode ? <Icon.Sun aria-hidden /> : <Icon.Moon aria-hidden />}
         </button>
         <div className="suite-user" ref={userRef}>
           <button className="suite-user-trigger" onClick={() => setUserOpen((o) => !o)} aria-expanded={userOpen}>
@@ -183,11 +212,36 @@ export default function SuiteBar() {
                 </div>
               </div>
               <button className="suite-user-item" onClick={() => { setUserOpen(false); navigate("/admin"); }}>Workspace settings</button>
+              <button className="suite-user-item" onClick={() => { setUserOpen(false); setCheatsheetOpen(true); }}>Keyboard shortcuts</button>
+              <div className="suite-user-section">
+                <div className="suite-user-section-label">Density</div>
+                <div className="suite-density-toggle" role="radiogroup" aria-label="Row density">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={density === "comfortable"}
+                    className={`suite-density-opt ${density === "comfortable" ? "active" : ""}`}
+                    onClick={() => setDensity("comfortable")}
+                  >
+                    Comfortable
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={density === "compact"}
+                    className={`suite-density-opt ${density === "compact" ? "active" : ""}`}
+                    onClick={() => setDensity("compact")}
+                  >
+                    Compact
+                  </button>
+                </div>
+              </div>
               <button className="suite-user-item danger" onClick={handleLogout}>Sign out</button>
             </div>
           )}
         </div>
       </div>
+      <ShortcutsCheatsheet open={cheatsheetOpen} onClose={() => setCheatsheetOpen(false)} />
     </header>
   );
 }

@@ -1,12 +1,55 @@
+import { useMemo } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { useGetInteractionsQuery, useCreateInteractionMutation } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import DataTable from "../../shell/DataTable";
+import { useDrawerPeek } from "../../shell/DetailDrawer";
+import { promptForValues } from "../../shell/modalService";
 
 const INTERACTION_TYPES = ["call", "email", "meeting", "note", "demo"];
 
+type Interaction = {
+  id: string;
+  interaction_type: string;
+  subject: string;
+  interaction_date?: string;
+  body?: string;
+};
+
 export default function InteractionsPage() {
-  const { data: interactions = [], refetch } = useGetInteractionsQuery({});
+  const { data: interactions = [], isLoading, refetch } = useGetInteractionsQuery({});
   const [createInteraction] = useCreateInteractionMutation();
+  const { open: openPeek } = useDrawerPeek();
+
+  const columns = useMemo<ColumnDef<Interaction, any>[]>(
+    () => [
+      {
+        accessorKey: "interaction_type",
+        header: "Type",
+        cell: (c) => <span className="badge badge-blue">{c.getValue() as string}</span>,
+      },
+      {
+        accessorKey: "subject",
+        header: "Subject",
+        cell: (c) => <span style={{ fontWeight: 500 }}>{c.getValue() as string}</span>,
+      },
+      {
+        accessorKey: "interaction_date",
+        header: "Date",
+        cell: (c) => (c.getValue() as string) || "-",
+      },
+      {
+        accessorKey: "body",
+        header: "Notes",
+        cell: (c) => {
+          const v = c.getValue() as string | undefined;
+          return <span style={{ fontSize: "0.82rem", color: "var(--gray-500)" }}>{v?.slice(0, 80) || "-"}</span>;
+        },
+      },
+    ],
+    [],
+  );
 
   return (
     <div>
@@ -16,31 +59,37 @@ export default function InteractionsPage() {
           {
             key: "new", label: "Log interaction", variant: "primary",
             onClick: async () => {
-              const subject = prompt("Subject:"); if (!subject) return;
-              const interaction_type = prompt(`Type (${INTERACTION_TYPES.join("/")}):`, "note") || "note";
-              const body = prompt("Notes (optional):") || "";
-              await createInteraction({ subject, interaction_type, body });
+              const v = await promptForValues({
+                title: "Log interaction",
+                submitLabel: "Log",
+                fields: [
+                  { name: "subject", label: "Subject", required: true },
+                  {
+                    name: "interaction_type", label: "Type", kind: "select", defaultValue: "note",
+                    options: INTERACTION_TYPES.map((t) => ({ value: t, label: t })),
+                  },
+                  { name: "body", label: "Notes", kind: "textarea", placeholder: "Optional" },
+                ],
+              });
+              if (!v) return;
+              await createInteraction({
+                subject: v.subject,
+                interaction_type: v.interaction_type || "note",
+                body: v.body || "",
+              });
               refetch();
             },
           },
         ]}
       />
-      <div className="card" style={{ padding: 0 }}>
-        <table>
-          <thead><tr><th>Type</th><th>Subject</th><th>Date</th><th>Notes</th></tr></thead>
-          <tbody>
-            {interactions.map((i: any) => (
-              <tr key={i.id}>
-                <td><span className="badge badge-blue">{i.interaction_type}</span></td>
-                <td style={{ fontWeight: 500 }}>{i.subject}</td>
-                <td>{i.interaction_date || "-"}</td>
-                <td style={{ fontSize: "0.82rem", color: "var(--gray-500)" }}>{i.body?.slice(0, 80) || "-"}</td>
-              </tr>
-            ))}
-            {interactions.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--gray-500)", padding: "1rem" }}>No interactions logged.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={interactions as Interaction[]}
+        isLoading={isLoading}
+        emptyTitle="No interactions logged"
+        emptyDescription="Log your first call, email, or meeting to track engagement."
+        onRowClick={(row) => openPeek("interaction", row.id)}
+      />
     </div>
   );
 }

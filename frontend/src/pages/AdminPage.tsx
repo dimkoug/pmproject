@@ -9,6 +9,7 @@ import {
   useGetSsoProvidersQuery, useCreateSsoProviderMutation,
   useGetWorkspacesQuery, useCreateWorkspaceMutation,
 } from "../services/api";
+import { promptForValues, confirmAction, notifyUser } from "../shell/modalService";
 
 const ADMIN_TABS = ["approvals", "webhooks", "api-keys", "audit", "schedules", "dashboards", "sso", "workspaces"] as const;
 
@@ -69,7 +70,18 @@ export default function AdminPage() {
               <td>{a.status === "pending" ? (
                 <div style={{ display: "flex", gap: "0.25rem" }}>
                   <button className="btn btn-sm btn-primary" onClick={async () => { await decide({ id: a.id, body: { decision: "approved" } }); rApp(); }}>Approve</button>
-                  <button className="btn btn-sm" onClick={async () => { const n = prompt("Reason:") || ""; await decide({ id: a.id, body: { decision: "rejected", note: n } }); rApp(); }}>Reject</button>
+                  <button className="btn btn-sm" onClick={async () => {
+                    const v = await promptForValues({
+                      title: "Reject approval",
+                      submitLabel: "Reject",
+                      fields: [
+                        { name: "note", label: "Reason", kind: "textarea", placeholder: "Optional" },
+                      ],
+                    });
+                    if (!v) return;
+                    await decide({ id: a.id, body: { decision: "rejected", note: v.note || "" } });
+                    rApp();
+                  }}>Reject</button>
                 </div>
               ) : <span style={{ fontSize: "0.82rem" }}>{a.decided_at ? new Date(a.decided_at).toLocaleDateString() : ""}</span>}</td>
             </tr>)}
@@ -83,11 +95,23 @@ export default function AdminPage() {
           <div className="card">
             <div className="card-header"><h3>Webhooks</h3>
               <button className="btn btn-sm btn-primary" onClick={async () => {
-                const name = prompt("Name:"); if (!name) return;
-                const url = prompt("URL:"); if (!url) return;
-                const events = prompt("Events (comma-sep):", "*") || "*";
-                const r: any = await createHook({ name, url, events });
-                if (r.data?.secret) alert(`Secret: ${r.data.secret}\nSave this — used to sign webhook payloads.`);
+                const v = await promptForValues({
+                  title: "New webhook",
+                  submitLabel: "Create",
+                  fields: [
+                    { name: "name", label: "Name", required: true },
+                    { name: "url", label: "URL", required: true },
+                    { name: "events", label: "Events (comma-sep)", defaultValue: "*" },
+                  ],
+                });
+                if (!v) return;
+                const r: any = await createHook({ name: v.name, url: v.url, events: v.events || "*" });
+                if (r.data?.secret) {
+                  await notifyUser({
+                    title: "Webhook created",
+                    description: `Secret: ${r.data.secret}\nSave this — used to sign webhook payloads.`,
+                  });
+                }
                 rHooks();
               }}>+ New Webhook</button>
             </div>
@@ -101,7 +125,17 @@ export default function AdminPage() {
                   <div style={{ display: "flex", gap: "0.25rem" }}>
                     <button className="btn btn-sm" onClick={async () => { await testHook({ id: h.id, body: { event: "test.ping", payload: { hello: "world" } } }); setTimeout(() => setExpandedHook(h.id), 500); }}>Test</button>
                     <button className="btn btn-sm" onClick={() => setExpandedHook(expandedHook === h.id ? null : h.id)}>Deliveries</button>
-                    <button className="btn btn-sm" onClick={async () => { if (confirm(`Delete ${h.name}?`)) { await deleteHook(h.id); rHooks(); } }}>Delete</button>
+                    <button className="btn btn-sm" onClick={async () => {
+                      const ok = await confirmAction({
+                        title: "Delete webhook?",
+                        description: `Delete ${h.name}?`,
+                        submitLabel: "Delete",
+                        dangerous: true,
+                      });
+                      if (!ok) return;
+                      await deleteHook(h.id);
+                      rHooks();
+                    }}>Delete</button>
                   </div>
                 </td>
               </tr>)}
@@ -127,9 +161,21 @@ export default function AdminPage() {
         <div className="card">
           <div className="card-header"><h3>API Keys</h3>
             <button className="btn btn-sm btn-primary" onClick={async () => {
-              const name = prompt("Key name:"); if (!name) return;
-              const r: any = await createKey({ name });
-              if (r.data?.api_key) alert(`API key:\n${r.data.api_key}\n\n${r.data.warning}`);
+              const v = await promptForValues({
+                title: "New API key",
+                submitLabel: "Create",
+                fields: [
+                  { name: "name", label: "Key name", required: true },
+                ],
+              });
+              if (!v) return;
+              const r: any = await createKey({ name: v.name });
+              if (r.data?.api_key) {
+                await notifyUser({
+                  title: "API key created",
+                  description: `API key:\n${r.data.api_key}\n\n${r.data.warning}`,
+                });
+              }
               rKeys();
             }}>+ New Key</button>
           </div>
@@ -139,7 +185,16 @@ export default function AdminPage() {
               <td style={{ fontFamily: "monospace" }}>{k.prefix}…</td>
               <td>{k.is_active ? <span className="badge badge-green">Yes</span> : <span className="badge badge-red">Revoked</span>}</td>
               <td style={{ fontSize: "0.82rem" }}>{k.last_used_at ? new Date(k.last_used_at).toLocaleDateString() : "Never"}</td>
-              <td>{k.is_active && <button className="btn btn-sm" onClick={async () => { if (confirm("Revoke?")) { await revokeKey(k.id); rKeys(); } }}>Revoke</button>}</td>
+              <td>{k.is_active && <button className="btn btn-sm" onClick={async () => {
+                const ok = await confirmAction({
+                  title: "Revoke API key?",
+                  submitLabel: "Revoke",
+                  dangerous: true,
+                });
+                if (!ok) return;
+                await revokeKey(k.id);
+                rKeys();
+              }}>Revoke</button>}</td>
             </tr>)}
           </tbody></table>
         </div>
@@ -170,13 +225,36 @@ export default function AdminPage() {
         <div className="card">
           <div className="card-header"><h3>Scheduled Reports</h3>
             <div style={{ display: "flex", gap: "0.5rem" }}>
-              <button className="btn btn-sm" onClick={async () => { const r: any = await runSchedules(); alert(`Ran ${r.data?.ran || 0}`); rSched(); }}>Run Due</button>
+              <button className="btn btn-sm" onClick={async () => {
+                const r: any = await runSchedules();
+                await notifyUser({ title: "Schedules run", description: `Ran ${r.data?.ran || 0}` });
+                rSched();
+              }}>Run Due</button>
               <button className="btn btn-sm btn-primary" onClick={async () => {
-                const name = prompt("Report name:"); if (!name) return;
-                const endpoint = prompt("Endpoint (e.g. /api/crm/dashboard):") || "";
-                const freq = prompt("Frequency (daily/weekly/monthly):", "weekly") || "weekly";
-                const recipients = prompt("Recipients (comma sep):") || "";
-                await createSchedule({ name, endpoint, frequency: freq, recipients });
+                const v = await promptForValues({
+                  title: "New scheduled report",
+                  submitLabel: "Create",
+                  fields: [
+                    { name: "name", label: "Report name", required: true },
+                    { name: "endpoint", label: "Endpoint", placeholder: "e.g. /api/crm/dashboard" },
+                    {
+                      name: "frequency", label: "Frequency", kind: "select", defaultValue: "weekly",
+                      options: [
+                        { value: "daily", label: "Daily" },
+                        { value: "weekly", label: "Weekly" },
+                        { value: "monthly", label: "Monthly" },
+                      ],
+                    },
+                    { name: "recipients", label: "Recipients (comma sep)" },
+                  ],
+                });
+                if (!v) return;
+                await createSchedule({
+                  name: v.name,
+                  endpoint: v.endpoint || "",
+                  frequency: v.frequency || "weekly",
+                  recipients: v.recipients || "",
+                });
                 rSched();
               }}>+ New</button>
             </div>
@@ -197,11 +275,27 @@ export default function AdminPage() {
         <div className="card">
           <div className="card-header"><h3>Custom Dashboards</h3>
             <button className="btn btn-sm btn-primary" onClick={async () => {
-              const name = prompt("Dashboard name:"); if (!name) return;
-              const widgetTitle = prompt("First widget title:") || "Widget";
-              const endpoint = prompt("Widget endpoint (e.g. /api/crm/dashboard):") || "";
-              const jsonPath = prompt("JSON path (e.g. pipeline_value):") || "";
-              await createDash({ name, widgets: [{ title: widgetTitle, widget_type: "stat", endpoint, json_path: jsonPath, position: 0 }] });
+              const v = await promptForValues({
+                title: "New dashboard",
+                submitLabel: "Create",
+                fields: [
+                  { name: "name", label: "Dashboard name", required: true },
+                  { name: "widgetTitle", label: "First widget title", defaultValue: "Widget" },
+                  { name: "endpoint", label: "Widget endpoint", placeholder: "e.g. /api/crm/dashboard" },
+                  { name: "jsonPath", label: "JSON path", placeholder: "e.g. pipeline_value" },
+                ],
+              });
+              if (!v) return;
+              await createDash({
+                name: v.name,
+                widgets: [{
+                  title: v.widgetTitle || "Widget",
+                  widget_type: "stat",
+                  endpoint: v.endpoint || "",
+                  json_path: v.jsonPath || "",
+                  position: 0,
+                }],
+              });
               rDash();
             }}>+ New</button>
           </div>
@@ -210,7 +304,16 @@ export default function AdminPage() {
               <td style={{ fontWeight: 500 }}>{d.name}</td>
               <td>{d.is_shared ? <span className="badge badge-green">Yes</span> : <span className="badge badge-gray">No</span>}</td>
               <td style={{ fontSize: "0.75rem" }}>{d.owner_id ? d.owner_id.slice(0, 8) + "…" : "-"}</td>
-              <td><button className="btn btn-sm" onClick={async () => { if (confirm("Delete?")) { await deleteDash(d.id); rDash(); } }}>Delete</button></td>
+              <td><button className="btn btn-sm" onClick={async () => {
+                const ok = await confirmAction({
+                  title: "Delete dashboard?",
+                  submitLabel: "Delete",
+                  dangerous: true,
+                });
+                if (!ok) return;
+                await deleteDash(d.id);
+                rDash();
+              }}>Delete</button></td>
             </tr>)}
           </tbody></table>
         </div>
@@ -220,11 +323,23 @@ export default function AdminPage() {
         <div className="card">
           <div className="card-header"><h3>SSO Providers <span style={{ fontSize: "0.75rem", color: "var(--warning)", fontWeight: 400 }}>(stub — real SSO requires OIDC/SAML library wiring)</span></h3>
             <button className="btn btn-sm btn-primary" onClick={async () => {
-              const name = prompt("Provider name:"); if (!name) return;
-              const issuer = prompt("OIDC issuer URL:") || "";
-              const cid = prompt("Client ID:") || "";
-              const cs = prompt("Client secret:") || "";
-              await createSso({ name, issuer_url: issuer, client_id: cid, client_secret: cs });
+              const v = await promptForValues({
+                title: "New SSO provider",
+                submitLabel: "Create",
+                fields: [
+                  { name: "name", label: "Provider name", required: true },
+                  { name: "issuer", label: "OIDC issuer URL" },
+                  { name: "client_id", label: "Client ID" },
+                  { name: "client_secret", label: "Client secret" },
+                ],
+              });
+              if (!v) return;
+              await createSso({
+                name: v.name,
+                issuer_url: v.issuer || "",
+                client_id: v.client_id || "",
+                client_secret: v.client_secret || "",
+              });
               rSso();
             }}>+ New</button>
           </div>
@@ -243,9 +358,17 @@ export default function AdminPage() {
         <div className="card">
           <div className="card-header"><h3>Workspaces <span style={{ fontSize: "0.75rem", color: "var(--warning)", fontWeight: 400 }}>(data model only — queries not yet scoped)</span></h3>
             <button className="btn btn-sm btn-primary" onClick={async () => {
-              const name = prompt("Workspace name:"); if (!name) return;
-              const slug = prompt("Slug (url-safe):") || name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-              await createWs({ name, slug });
+              const v = await promptForValues({
+                title: "New workspace",
+                submitLabel: "Create",
+                fields: [
+                  { name: "name", label: "Workspace name", required: true },
+                  { name: "slug", label: "Slug (url-safe)", placeholder: "Auto-generated from name if blank" },
+                ],
+              });
+              if (!v) return;
+              const slug = v.slug || v.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+              await createWs({ name: v.name, slug });
               rWs();
             }}>+ New</button>
           </div>

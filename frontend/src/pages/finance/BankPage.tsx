@@ -1,13 +1,70 @@
+import { useMemo } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import {
   useGetBankTransactionsQuery, useCreateBankTransactionMutation, useAutoMatchBankMutation,
 } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import DataTable from "../../shell/DataTable";
+import { useDrawerPeek } from "../../shell/DetailDrawer";
+import { promptForValues, notifyUser } from "../../shell/modalService";
+
+type BankTxn = {
+  id: string;
+  txn_date?: string;
+  description: string;
+  amount: number;
+  is_reconciled: boolean;
+  matched_invoice_id?: string;
+};
 
 export default function BankPage() {
-  const { data: bank = [], refetch } = useGetBankTransactionsQuery();
+  const { data: bank = [], isLoading, refetch } = useGetBankTransactionsQuery();
   const [createBank] = useCreateBankTransactionMutation();
   const [autoMatch] = useAutoMatchBankMutation();
+  const { open: openPeek } = useDrawerPeek();
+
+  const columns = useMemo<ColumnDef<BankTxn, any>[]>(
+    () => [
+      {
+        accessorKey: "txn_date",
+        header: "Date",
+        cell: (c) => (c.getValue() as string) || "-",
+      },
+      { accessorKey: "description", header: "Description" },
+      {
+        accessorKey: "amount",
+        header: "Amount",
+        cell: (c) => {
+          const v = c.getValue() as number;
+          return (
+            <span style={{ fontWeight: 600, color: v >= 0 ? "var(--success)" : "var(--danger)" }}>
+              ${v?.toLocaleString()}
+            </span>
+          );
+        },
+      },
+      {
+        accessorKey: "is_reconciled",
+        header: "Reconciled",
+        cell: (c) =>
+          c.getValue() ? (
+            <span className="badge badge-green">Yes</span>
+          ) : (
+            <span className="badge badge-gray">No</span>
+          ),
+      },
+      {
+        accessorKey: "matched_invoice_id",
+        header: "Matched invoice",
+        cell: (c) => {
+          const v = c.getValue() as string | undefined;
+          return <span style={{ fontSize: "0.75rem" }}>{v ? `${v.slice(0, 8)}…` : "-"}</span>;
+        },
+      },
+    ],
+    [],
+  );
 
   return (
     <div>
@@ -18,38 +75,37 @@ export default function BankPage() {
             key: "auto", label: "Auto match",
             onClick: async () => {
               const r: any = await autoMatch();
-              alert(`Matched ${r.data?.matched || 0}`);
+              await notifyUser({ title: "Auto-match complete", description: `Matched ${r.data?.matched || 0}` });
               refetch();
             },
           },
           {
             key: "new", label: "New transaction", variant: "primary",
             onClick: async () => {
-              const description = prompt("Description:"); if (!description) return;
-              const amount = parseFloat(prompt("Amount (negative for debit):") || "0");
-              await createBank({ description, amount });
+              const v = await promptForValues({
+                title: "New bank transaction",
+                submitLabel: "Create",
+                fields: [
+                  { name: "description", label: "Description", required: true },
+                  { name: "amount", label: "Amount", kind: "number", required: true, step: 0.01, helperText: "Negative for debit" },
+                ],
+              });
+              if (!v) return;
+              const amount = parseFloat(v.amount || "0");
+              await createBank({ description: v.description, amount });
               refetch();
             },
           },
         ]}
       />
-      <div className="card" style={{ padding: 0 }}>
-        <table>
-          <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Reconciled</th><th>Matched invoice</th></tr></thead>
-          <tbody>
-            {bank.map((t: any) => (
-              <tr key={t.id}>
-                <td>{t.txn_date || "-"}</td>
-                <td>{t.description}</td>
-                <td style={{ fontWeight: 600, color: t.amount >= 0 ? "var(--success)" : "var(--danger)" }}>${t.amount?.toLocaleString()}</td>
-                <td>{t.is_reconciled ? <span className="badge badge-green">Yes</span> : <span className="badge badge-gray">No</span>}</td>
-                <td style={{ fontSize: "0.75rem" }}>{t.matched_invoice_id ? `${t.matched_invoice_id.slice(0, 8)}…` : "-"}</td>
-              </tr>
-            ))}
-            {bank.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--gray-500)", padding: "1rem" }}>No bank transactions.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={bank as BankTxn[]}
+        isLoading={isLoading}
+        emptyTitle="No bank transactions yet"
+        emptyDescription="Import or log transactions to reconcile against invoices."
+        onRowClick={(row) => openPeek("bank-txn", row.id)}
+      />
     </div>
   );
 }

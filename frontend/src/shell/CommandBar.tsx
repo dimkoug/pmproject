@@ -1,4 +1,7 @@
+import { useMemo } from "react";
 import type { ReactNode } from "react";
+import { Icon } from "./icons";
+import { useHotkeys } from "./useHotkeys";
 
 export type CommandItem = {
   key: string;
@@ -28,6 +31,29 @@ export default function CommandBar({ items, overflow, right }: Props) {
   const visible = items.filter((i) => !i.hidden);
   const visibleOverflow = (overflow ?? []).filter((i) => !i.hidden);
 
+  const primary = useMemo(
+    () => visible.find((i) => i.variant === "primary" && i.onClick && !i.disabled),
+    [visible],
+  );
+  useHotkeys(
+    useMemo(
+      () =>
+        primary
+          ? [
+              {
+                combo: "n",
+                description: primary.label,
+                handler: (e) => {
+                  e.preventDefault();
+                  primary.onClick?.();
+                },
+              },
+            ]
+          : [],
+      [primary],
+    ),
+  );
+
   return (
     <div className="command-bar">
       <div className="command-bar-items">
@@ -36,7 +62,9 @@ export default function CommandBar({ items, overflow, right }: Props) {
         ))}
         {visibleOverflow.length > 0 && (
           <details className="command-overflow">
-            <summary className="btn btn-sm" aria-label="More actions">⋯ More</summary>
+            <summary className="btn btn-sm" aria-label="More actions">
+              <Icon.More size={14} aria-hidden /> More
+            </summary>
             <div className="command-overflow-panel">
               {visibleOverflow.map((item) => (
                 <CommandButton key={item.key} item={item} overflow />

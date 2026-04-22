@@ -1,10 +1,62 @@
+import { useMemo } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
 import { useGetEmailsQuery, useIngestEmailMutation } from "../../services/api";
 import PageHeader from "../../shell/PageHeader";
 import CommandBar from "../../shell/CommandBar";
+import DataTable from "../../shell/DataTable";
+import { useDrawerPeek } from "../../shell/DetailDrawer";
+import { promptForValues } from "../../shell/modalService";
+
+type Email = {
+  id: string;
+  direction: string;
+  subject?: string;
+  from_email: string;
+  to_email: string;
+  sent_at?: string;
+};
 
 export default function EmailsPage() {
-  const { data: emails = [], refetch } = useGetEmailsQuery({});
+  const { data: emails = [], isLoading, refetch } = useGetEmailsQuery({});
   const [ingestEmail] = useIngestEmailMutation();
+  const { open: openPeek } = useDrawerPeek();
+
+  const columns = useMemo<ColumnDef<Email, any>[]>(
+    () => [
+      {
+        accessorKey: "direction",
+        header: "Direction",
+        cell: (c) => {
+          const v = c.getValue() as string;
+          return <span className={`badge ${v === "inbound" ? "badge-blue" : "badge-green"}`}>{v}</span>;
+        },
+      },
+      {
+        accessorKey: "subject",
+        header: "Subject",
+        cell: (c) => <span style={{ fontWeight: 500 }}>{(c.getValue() as string) || "(no subject)"}</span>,
+      },
+      {
+        accessorKey: "from_email",
+        header: "From",
+        cell: (c) => <span style={{ fontSize: "0.82rem" }}>{c.getValue() as string}</span>,
+      },
+      {
+        accessorKey: "to_email",
+        header: "To",
+        cell: (c) => <span style={{ fontSize: "0.82rem" }}>{c.getValue() as string}</span>,
+      },
+      {
+        accessorKey: "sent_at",
+        header: "When",
+        cell: (c) => {
+          const v = c.getValue() as string | undefined;
+          return <span style={{ fontSize: "0.75rem" }}>{v ? new Date(v).toLocaleDateString() : ""}</span>;
+        },
+      },
+    ],
+    [],
+  );
 
   return (
     <div>
@@ -14,33 +66,37 @@ export default function EmailsPage() {
           {
             key: "log", label: "Log email", variant: "primary",
             onClick: async () => {
-              const from = prompt("From email:"); if (!from) return;
-              const to = prompt("To email:"); if (!to) return;
-              const subject = prompt("Subject:") || "";
-              const body = prompt("Body:") || "";
-              await ingestEmail({ direction: "inbound", from_email: from, to_email: to, subject, body });
+              const v = await promptForValues({
+                title: "Log email",
+                submitLabel: "Log",
+                fields: [
+                  { name: "from", label: "From email", kind: "email", required: true },
+                  { name: "to", label: "To email", kind: "email", required: true },
+                  { name: "subject", label: "Subject" },
+                  { name: "body", label: "Body", kind: "textarea", rows: 5 },
+                ],
+              });
+              if (!v) return;
+              await ingestEmail({
+                direction: "inbound",
+                from_email: v.from,
+                to_email: v.to,
+                subject: v.subject || "",
+                body: v.body || "",
+              });
               refetch();
             },
           },
         ]}
       />
-      <div className="card" style={{ padding: 0 }}>
-        <table>
-          <thead><tr><th>Direction</th><th>Subject</th><th>From</th><th>To</th><th>When</th></tr></thead>
-          <tbody>
-            {emails.map((e: any) => (
-              <tr key={e.id}>
-                <td><span className={`badge ${e.direction === "inbound" ? "badge-blue" : "badge-green"}`}>{e.direction}</span></td>
-                <td style={{ fontWeight: 500 }}>{e.subject || "(no subject)"}</td>
-                <td style={{ fontSize: "0.82rem" }}>{e.from_email}</td>
-                <td style={{ fontSize: "0.82rem" }}>{e.to_email}</td>
-                <td style={{ fontSize: "0.75rem" }}>{e.sent_at ? new Date(e.sent_at).toLocaleDateString() : ""}</td>
-              </tr>
-            ))}
-            {emails.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--gray-500)", padding: "1rem" }}>No emails logged.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={emails as Email[]}
+        isLoading={isLoading}
+        emptyTitle="No emails logged"
+        emptyDescription="Ingest an email to start building a timeline of outreach."
+        onRowClick={(row) => openPeek("email", row.id)}
+      />
     </div>
   );
 }
